@@ -1,0 +1,12 @@
+{"timestamp":"2025-06-26T22:47:33.627594","level":"info","event":"DAG bundles loaded: dags-folder, example_dags","logger":"airflow.dag_processing.bundles.manager.DagBundlesManager"}
+{"timestamp":"2025-06-26T22:47:33.628117","level":"info","event":"Filling up the DagBag from /opt/airflow/dags/basicDag.py","logger":"airflow.models.dagbag.DagBag"}
+{"timestamp":"2025-06-26T22:47:33.659530Z","level":"info","event":"Task instance is in running state","chan":"stdout","logger":"task"}
+{"timestamp":"2025-06-26T22:47:33.659808Z","level":"info","event":" Previous state of the Task instance: TaskInstanceState.QUEUED","chan":"stdout","logger":"task"}
+{"timestamp":"2025-06-26T22:47:33.660038Z","level":"info","event":"Current task name:task_three","chan":"stdout","logger":"task"}
+{"timestamp":"2025-06-26T22:47:33.660341Z","level":"info","event":"Dag name:time_based_demo_dag","chan":"stdout","logger":"task"}
+{"timestamp":"2025-06-26T22:47:33.660558Z","level":"info","event":"⏳ Starting task three...","chan":"stdout","logger":"task"}
+{"timestamp":"2025-06-26T22:47:38.648739Z","level":"info","event":"✅ Task three done.","chan":"stdout","logger":"task"}
+{"timestamp":"2025-06-26T22:47:38.648416","level":"info","event":"Done. Returned value was: None","logger":"airflow.task.operators.airflow.providers.standard.decorators.python._PythonDecoratedOperator"}
+{"timestamp":"2025-06-26T22:47:38.660625Z","level":"info","event":"Task instance in success state","chan":"stdout","logger":"task"}
+{"timestamp":"2025-06-26T22:47:38.661102Z","level":"info","event":" Previous state of the Task instance: TaskInstanceState.RUNNING","chan":"stdout","logger":"task"}
+{"timestamp":"2025-06-26T22:47:38.661335Z","level":"info","event":"Task operator:<Task(_PythonDecoratedOperator): task_three>","chan":"stdout","logger":"task"}
