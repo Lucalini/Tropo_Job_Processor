@@ -64,7 +64,6 @@ BasicDag/
 
 ### Environment Variables
 
-[INSERT ENVIRONMENT VARIABLES NEEDED]
 
 ### Airflow Configuration
 
@@ -87,19 +86,16 @@ The DAG implements the following workflow:
 
 ## Contributing
 
-[INSERT CONTRIBUTION GUIDELINES OR LINK TO CONTRIBUTING.md]
 
 ## License
-
-[INSERT LICENSE INFORMATION]
 
 ## Support
 
 For questions and support:
 
-- **Contact**: [INSERT CONTACT INFORMATION]
-- **Issues**: [INSERT ISSUE TRACKER URL]
-- **Documentation**: [INSERT ADDITIONAL DOCS URL IF AVAILABLE]
+- **Contact**: 
+- **Issues**: 
+- **Documentation**: 
 
 ## Changelog
 
@@ -109,9 +105,6 @@ For questions and support:
 - Dynamic task mapping for S3 data sources
 
 ## Acknowledgments
-
-- Apache Airflow community for the excellent workflow orchestration platform
-- [INSERT ANY OTHER ACKNOWLEDGMENTS]
 
 ---
 
