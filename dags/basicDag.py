@@ -1,8 +1,66 @@
+from cgitb import reset
+from unittest import result
 from airflow.decorators import dag, task, task_group
 from datetime import datetime, timedelta
 import time
-import docker
 import logging
+import boto3
+import yaml
+import os
+import docker
+
+
+bucket_name = ''
+container_name = "Temp"
+
+def create_modified_runconfig(template_path, output_path, **kwargs):
+    """
+    Create a modified run configuration based on a template.
+    
+    Args:
+        template_path: Path to the template run configuration file
+        output_path: Path where the modified configuration will be saved
+        **kwargs: Key-value pairs for configuration modifications
+    """
+    # Load the template configuration
+    with open(template_path, 'r') as file:
+        config = yaml.safe_load(file)
+    
+    # Extract common parameters from kwargs
+    input_file = kwargs.get('input_file')
+    output_dir = kwargs.get('output_dir')
+    scratch_dir = kwargs.get('scratch_dir')
+    n_workers = kwargs.get('n_workers', 4)
+    product_version = kwargs.get('product_version', '0.2')
+    
+    # Modify paths based on parameters
+    if input_file:
+        config['RunConfig']['Groups']['PGE']['InputFilesGroup']['InputFilePaths'] = [input_file]
+        config['RunConfig']['Groups']['SAS']['input_file']['input_file_path'] = input_file
+    
+    # Update output and scratch directories
+    config['RunConfig']['Groups']['PGE']['ProductPathGroup']['OutputProductPath'] = output_dir
+    config['RunConfig']['Groups']['PGE']['ProductPathGroup']['ScratchPath'] = scratch_dir
+    
+    config['RunConfig']['Groups']['SAS']['product_path_group']['product_path'] = output_dir
+    config['RunConfig']['Groups']['SAS']['product_path_group']['scratch_path'] = scratch_dir
+    config['RunConfig']['Groups']['SAS']['product_path_group']['sas_output_path'] = output_dir
+    
+    # Update worker settings
+    config['RunConfig']['Groups']['SAS']['worker_settings']['n_workers'] = n_workers
+    
+    # Update product version
+    config['RunConfig']['Groups']['PGE']['PrimaryExecutable']['ProductVersion'] = str(product_version)
+    config['RunConfig']['Groups']['SAS']['product_path_group']['product_version'] = str(product_version)
+
+    # Create the directory if it doesn't exist (including parent directories)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    # Save the modified configuration
+    with open(f"{output_path}runconfig.yaml", 'w') as file:
+        yaml.dump(config, file, default_flow_style=False, sort_keys=False, indent=2)
+    
+    return output_path
 
 default_args = {
     'owner': 'airflow',
@@ -23,38 +81,114 @@ def tropo_job_dag():
     
     @task
     def data_search():
-        logging.info("Searching S3 for data over [DATE_RANGE]")
-        time.sleep(10)
-        s3_urls = ["s3://example_bucket", "s3://example_bucket2"]
-        return s3_urls
+        s3 = boto3.client('s3')
+        bucket_name = 'tropo-example-bucket'
 
+        response = s3.list_objects_v2(Bucket = bucket_name)['Contents']
+        
+        tropo_directory = "/opt/airflow/config/tropo-objects"
+        file_paths = []
+
+        for obj in response:
+            object_key = obj['Key']
+
+            local_file_path = f"{tropo_directory}/{object_key.split('/')[-1]}"
+          
+            s3.download_file(bucket_name, object_key, local_file_path)
+
+            logging.info(f"Downloaded {object_key} to {local_file_path}")
+
+            file_paths.append(local_file_path)
+        return file_paths
 
     @task_group(group_id="tropo_job_group")
-    def process_tropo_object(s3_url):
+    def process_tropo_object(data_filepath):
 
         @task
-        def job_preprocessing():
-            logging.info("Preprocessing job")
-            time.sleep(10)
-            return "Preprocessed job"
+        def job_preprocessing(filepath):
+            logging.info(f"Preprocessing job {filepath}")
+
+            
+            DAG_DIR = os.path.dirname(__file__)
+            template_file = os.path.join(DAG_DIR, "tropo_sample_runconfig-v3.0.0-er.3.1.yaml")
+            config_path = create_modified_runconfig(
+                template_path=template_file,
+                output_path= f"/opt/airflow/config/{filepath.split('/')[-1].split('.')[0]}/",
+                input_file=  filepath,
+                output_dir="/opt/airflow/output",
+                scratch_dir="/opt/airflow/config/scratch",
+                n_workers=8,
+                product_version="0.3"
+            )
+            return config_path
+        preprocessing_result = job_preprocessing(filepath=data_filepath)
+        
 
         @task
-        def spinup_workers(s3_url):
-            print(f"Processing {s3_url}")
+        def spinup_workers(config_path: str, input_path: str):
+            """
+            Start a docker container using the python docker SDK instead of the DockerOperator.
+            
+            Args:
+                config_path (str): Directory provided from job_preprossesing that contians the run config
+                input_path (str):  Directory provided from data_search containing downloaded troposhperic data
+            """
+
+            logging.info("Spinning up container for %s", input_path)
+
             client = docker.from_env()
+
+            # Build environment variables for the container
+            env_vars = {
+                "UID": str(os.getuid()),
+                "container_name": input_path.split('/')[-1],
+                "CONFIG_PATH": config_path,
+                "input_data_dir": "/home/airflow/input_data",
+                "output_dir": "/opt/airflow/output",
+                "scratch_dir": "/opt/airflow/config/scratch",
+            }
+
+            command_str = (
+                "sh -c "
+                "\"echo '=== Environment Variables ===' && env | sort && "
+                "echo '=== Mount Points ===' && df -h && "
+                "echo '=== DAGS Directory ===' && ls -la /opt/airflow/dags/ 2>/dev/null || echo 'DAGS dir not accessible' && "
+                "echo '=== LOGS Directory ===' && ls -la /opt/airflow/logs/ 2>/dev/null || echo 'LOGS dir not accessible' && "
+                "echo '=== CONFIG Directory ===' && ls -la /opt/airflow/config/ 2>/dev/null || echo 'CONFIG dir not accessible' && "
+                "echo '=== PLUGINS Directory ===' && ls -la /opt/airflow/plugins/ 2>/dev/null || echo 'PLUGINS dir not accessible' && "
+                "echo '=== OUTPUT Directory ===' && ls -la /opt/airflow/output/ 2>/dev/null || echo 'OUTPUT dir not accessible' && "
+                "echo '=== SCRATCH Directory ===' && ls -la /opt/airflow/scratch/ 2>/dev/null || echo 'SCRATCH dir not accessible'\""
+            )
+
+            container_name_local = f"spinup_worker_{int(time.time())}"
+
+            # Leverage the fact that this code is executed **inside** an Airflow worker
+            # container. By passing the current container ID (available via the HOSTNAME
+            # environment variable) via the ``volumes_from`` parameter we automatically
+            # share **all** bind-mounts declared for the Airflow containers in
+            # docker-compose (dags, logs, config, plugins, etc.) with the new spin-up
+            # container.  This keeps the two containers in sync without hard-coding the
+            # paths a second time.
+
+            current_container_id = os.environ.get("HOSTNAME")
+
             try:
-                container = client.containers.run(
-                    image="hello-world",
-                    command= None,
-                    remove=True,
+                output = client.containers.run(
+                    image="python:3.9-alpine",
+                    command=command_str,
+                    name=container_name_local,
+                    environment=env_vars,
+                    volumes_from=[current_container_id] if current_container_id else None,
+                    remove=False,
                     detach=False,
                 )
-                print(f"Container output: {container}")
-                time.sleep(10)
-                return f"Processed {s3_url} successfully"
-            except Exception as e:
-                print(f"Error processing {s3_url}: {str(e)}")
-                raise
+                logging.info("Container finished. Output:\n%s", output.decode("utf-8") if isinstance(output, bytes) else output)
+            finally:
+                client.close()
+
+            return f"Container {container_name_local} completed"
+
+        spinup_workers_result = spinup_workers(config_path=preprocessing_result, input_path=data_filepath)
 
         @task 
         def post_processing():
@@ -62,16 +196,14 @@ def tropo_job_dag():
             time.sleep(10)
             return "Postprocessed job"
 
-        preprocessing_result = job_preprocessing()
-        processing_result = spinup_workers(s3_url)
         post_processing_result = post_processing()
 
-        preprocessing_result >> processing_result >> post_processing_result
+        preprocessing_result >> spinup_workers_result >> post_processing_result
         
 
     
-    s3_urls = data_search()
-    process_tropo_object.expand(s3_url=s3_urls)
+    data_filepaths = data_search()
+    process_tropo_object.expand(data_filepath= data_filepaths)
 
 
 # Instantiate the DAG
