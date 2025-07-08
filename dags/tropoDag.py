@@ -70,7 +70,7 @@ default_args = {
 
 
 @dag(
-    dag_id='time_based_demo_dag',
+    dag_id='tropo_dag',
     default_args=default_args,
     schedule=None,
     start_date=datetime(2025, 1, 1),
@@ -99,6 +99,7 @@ def tropo_job_dag():
             logging.info(f"Downloaded {object_key} to {local_file_path}")
 
             file_paths.append(local_file_path)
+
         return file_paths
 
     @task_group(group_id="tropo_job_group")
@@ -117,10 +118,11 @@ def tropo_job_dag():
                 input_file=  filepath,
                 output_dir="/opt/airflow/output",
                 scratch_dir="/opt/airflow/config/scratch",
-                n_workers=8,
+                n_workers=4,
                 product_version="0.3"
             )
             return config_path
+
         preprocessing_result = job_preprocessing(filepath=data_filepath)
         
 
@@ -148,38 +150,23 @@ def tropo_job_dag():
                 "scratch_dir": "/opt/airflow/config/scratch",
             }
 
-            command_str = (
-                "sh -c "
-                "\"echo '=== Environment Variables ===' && env | sort && "
-                "echo '=== Mount Points ===' && df -h && "
-                "echo '=== DAGS Directory ===' && ls -la /opt/airflow/dags/ 2>/dev/null || echo 'DAGS dir not accessible' && "
-                "echo '=== LOGS Directory ===' && ls -la /opt/airflow/logs/ 2>/dev/null || echo 'LOGS dir not accessible' && "
-                "echo '=== CONFIG Directory ===' && ls -la /opt/airflow/config/ 2>/dev/null || echo 'CONFIG dir not accessible' && "
-                "echo '=== PLUGINS Directory ===' && ls -la /opt/airflow/plugins/ 2>/dev/null || echo 'PLUGINS dir not accessible' && "
-                "echo '=== OUTPUT Directory ===' && ls -la /opt/airflow/output/ 2>/dev/null || echo 'OUTPUT dir not accessible' && "
-                "echo '=== SCRATCH Directory ===' && ls -la /opt/airflow/scratch/ 2>/dev/null || echo 'SCRATCH dir not accessible'\""
-            )
+            # Build the command so the PGE receives the required runconfig file (-f flag)
+            runconfig_file = os.path.join(config_path, "runconfig.yaml")
+            cmd = ["-f", runconfig_file]
 
-            container_name_local = f"spinup_worker_{int(time.time())}"
-
-            # Leverage the fact that this code is executed **inside** an Airflow worker
-            # container. By passing the current container ID (available via the HOSTNAME
-            # environment variable) via the ``volumes_from`` parameter we automatically
-            # share **all** bind-mounts declared for the Airflow containers in
-            # docker-compose (dags, logs, config, plugins, etc.) with the new spin-up
-            # container.  This keeps the two containers in sync without hard-coding the
-            # paths a second time.
+            container_name_local = input_path.split('/')[-1]
 
             current_container_id = os.environ.get("HOSTNAME")
 
             try:
                 output = client.containers.run(
-                    image="python:3.9-alpine",
-                    command=command_str,
+                    image="opera_pge/tropo:3.0.0-er.3.1-tropo",
+                    command=cmd,
                     name=container_name_local,
                     environment=env_vars,
+                    user="0",
                     volumes_from=[current_container_id] if current_container_id else None,
-                    remove=False,
+                    remove=True,
                     detach=False,
                 )
                 logging.info("Container finished. Output:\n%s", output.decode("utf-8") if isinstance(output, bytes) else output)
