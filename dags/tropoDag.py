@@ -1,12 +1,19 @@
 from cgitb import reset
+import re
+from select import poll
 from unittest import result
 from airflow.decorators import dag, task, task_group
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 import logging
 import boto3
 import yaml
 import os
+import requests
+from requests.auth import HTTPBasicAuth
+from pathlib import PurePath
+from urllib.parse import urlparse
+import json 
 import docker
 
 
@@ -82,28 +89,33 @@ def tropo_job_dag():
     @task
     def data_search():
         s3 = boto3.client('s3')
-        bucket_name = 'tropo-example-bucket'
+        # bucket_name = 'tropo-example-bucket'
 
-        response = s3.list_objects_v2(Bucket = bucket_name)['Contents']
+        # response = s3.list_objects_v2(Bucket = bucket_name)['Contents']
         
-        tropo_directory = "/opt/airflow/config/tropo-objects"
-        file_paths = []
+        # tropo_directory = "/opt/airflow/config/tropo-objects"
+        # file_paths = []
 
-        for obj in response:
-            object_key = obj['Key']
+        # for obj in response:
+        #     object_key = obj['Key']
 
-            local_file_path = f"{tropo_directory}/{object_key.split('/')[-1]}"
+        #     local_file_path = f"{tropo_directory}/{object_key.split('/')[-1]}"
           
-            s3.download_file(bucket_name, object_key, local_file_path)
+        #     s3.download_file(bucket_name, object_key, local_file_path)
 
-            logging.info(f"Downloaded {object_key} to {local_file_path}")
+        #     logging.info(f"Downloaded {object_key} to {local_file_path}")
 
-            file_paths.append(local_file_path)
+        #     file_paths.append(local_file_path)
 
-        return file_paths
+        urls = [
+                "s3://opera-ecmwf/20170223/ECMWF_TROP_201702230000_201702230000_1.nc",
+                "s3://opera-ecmwf/20170223/ECMWF_TROP_201702230600_201702230600_1.nc"
+        ]
+
+        return urls
 
     @task_group(group_id="tropo_job_group")
-    def process_tropo_object(data_filepath):
+    def process_tropo_object(url):
 
         @task
         def job_preprocessing(filepath):
@@ -123,59 +135,111 @@ def tropo_job_dag():
             )
             return config_path
 
-        preprocessing_result = job_preprocessing(filepath=data_filepath)
+        preprocessing_result = job_preprocessing(filepath=url)
         
 
         @task
-        def spinup_workers(config_path: str, input_path: str):
-            """
-            Start a docker container using the python docker SDK instead of the DockerOperator.
+        def submit_job(object_url):
+        
+            jobtype = "job-SCIFLO_L4_TROPO:develop"
+            queue = "opera-job_worker-sciflo-l4_tropo"
+            mozart_url = "https://100.104.40.155/mozart/api/v0.1/job/submit"
+
+            logging.info(type(object_url))
+
+            # Construct the payload. "params" must be a JSON string with the
+            # actual metadata. The API expects the query string to look like
+            # params=%7B%22product_metadata%22%3A%22s3://...%22%7D (i.e. the
+            # JSON object URL-encoded)
+
+            parsed = urlparse(object_url)
+            if parsed.scheme != "s3" or not parsed.netloc:
+                raise ValueError(f"Invalid S3 URI: {object_url}")
             
-            Args:
-                config_path (str): Directory provided from job_preprossesing that contians the run config
-                input_path (str):  Directory provided from data_search containing downloaded troposhperic data
-            """
+    
+            s3_key = parsed.path.lstrip('/')
+            logging.info(s3_key)
 
-            logging.info("Spinning up container for %s", input_path)
+            product = {"product_metadata" :{
+                    "dataset": f"L4_TROPO-{s3_key}",
+                    "metadata": {
+                        "batch_id": s3_key,
+                        "product_paths": {"L4_TROPO": [object_url]},  
+                        "ProductReceivedTime": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "FileName": PurePath(s3_key).name,
+                        "FileLocation": s3_key,
+                        "id": s3_key,
+                        "Files": [
+                            {
+                                "FileName": PurePath(s3_key).name,
+                                "FileSize": 1, 
+                                "FileLocation": object_url,
+                                "id": PurePath(s3_key).name,
+                                "product_paths": "$.product_paths"
+                            }
+                        ]
+                    }
+                },
+                "dataset_type":"L4_TROPO",
+                "input_dataset_id": s3_key
+                }
 
-            client = docker.from_env()
+            params = json.dumps(product)
+            logging.info(params)
 
-            # Build environment variables for the container
-            env_vars = {
-                "UID": str(os.getuid()),
-                "container_name": input_path.split('/')[-1],
-                "CONFIG_PATH": config_path,
-                "input_data_dir": "/home/airflow/input_data",
-                "output_dir": "/opt/airflow/output",
-                "scratch_dir": "/opt/airflow/config/scratch",
+            payload = {
+                "type": jobtype,
+                "queue": queue,
+                "params": params 
             }
 
-            # Build the command so the PGE receives the required runconfig file (-f flag)
-            runconfig_file = os.path.join(config_path, "runconfig.yaml")
-            cmd = ["-f", runconfig_file]
+            job = requests.post(
+                mozart_url,
+                params=payload,  # send as JSON body, not query string
+                verify=False,    # NOTE: ignore SSL verification (test only)
+                auth=HTTPBasicAuth("", "")
+            )
+            job.raise_for_status()
+            logging.info(job)
+            
+            response = job.json()
+            if response["success"] == True:
+                job_id = response["result"]
+                logging.info(f"jobID:{job_id}")
 
-            container_name_local = input_path.split('/')[-1]
+                poll_url = "https://100.104.40.155/mozart/api/v0.1/job/status"
+                poll_payload = {"id": job_id}
 
-            current_container_id = os.environ.get("HOSTNAME")
+                #Give ample time for job to be visible
+                time.sleep(200)
 
-            try:
-                output = client.containers.run(
-                    image="opera_pge/tropo:3.0.0-er.3.1-tropo",
-                    command=cmd,
-                    name=container_name_local,
-                    environment=env_vars,
-                    user="0",
-                    volumes_from=[current_container_id] if current_container_id else None,
-                    remove=True,
-                    detach=False,
-                )
-                logging.info("Container finished. Output:\n%s", output.decode("utf-8") if isinstance(output, bytes) else output)
-            finally:
-                client.close()
+                #Job Polling loop
+                while True:
+                    status = requests.get(poll_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("", ""))
+                    status.raise_for_status()
 
-            return f"Container {container_name_local} completed"
+                    status_json = status.json()
 
-        spinup_workers_result = spinup_workers(config_path=preprocessing_result, input_path=data_filepath)
+                    if status_json["status"] not in ("job-started", "job-queued"):
+                        break
+                    logging.info(f"job: {job_id} {status_json['status']}")
+                    time.sleep(2)
+                
+                if status_json["status"] == "job-failed":
+                  raise Exception(f"Processing for {object_url} failed, {response.get('message', 'No message')}!")
+
+                else:
+                    result_url = "https://100.104.40.155/mozart/api/v0.1/job/info"
+                    result = requests.get(result_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("", ""))
+                    result.raise_for_status()
+                    return result.json().get("message", "No message returned")
+
+            else:
+                raise Exception(f"Job submission for {object_url} failed, {response.get('message', 'No message')}!")
+            
+            
+
+        submit_job_result = submit_job(object_url=url)
 
         @task 
         def post_processing():
@@ -185,12 +249,12 @@ def tropo_job_dag():
 
         post_processing_result = post_processing()
 
-        preprocessing_result >> spinup_workers_result >> post_processing_result
+        preprocessing_result >> submit_job_result >> post_processing_result
         
 
     
     data_filepaths = data_search()
-    process_tropo_object.expand(data_filepath= data_filepaths)
+    process_tropo_object.expand(url=data_filepaths)
 
 
 # Instantiate the DAG
