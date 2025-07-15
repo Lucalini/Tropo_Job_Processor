@@ -15,6 +15,7 @@ from pathlib import PurePath
 from urllib.parse import urlparse
 import json 
 import docker
+from util import get_tropo_objects
 
 
 bucket_name = ''
@@ -88,29 +89,16 @@ def tropo_job_dag():
     
     @task
     def data_search():
-        s3 = boto3.client('s3')
-        # bucket_name = 'tropo-example-bucket'
-
-        # response = s3.list_objects_v2(Bucket = bucket_name)['Contents']
         
-        # tropo_directory = "/opt/airflow/config/tropo-objects"
-        # file_paths = []
+        #temporarily hardcoded data search 
 
-        # for obj in response:
-        #     object_key = obj['Key']
+        bucket_name = "opera-ecmwf"
+        urls = get_tropo_objects(bucket_name, date="2024-12-31")
 
-        #     local_file_path = f"{tropo_directory}/{object_key.split('/')[-1]}"
-          
-        #     s3.download_file(bucket_name, object_key, local_file_path)
-
-        #     logging.info(f"Downloaded {object_key} to {local_file_path}")
-
-        #     file_paths.append(local_file_path)
-
-        urls = [
-                "s3://opera-ecmwf/20170223/ECMWF_TROP_201702230000_201702230000_1.nc",
-                "s3://opera-ecmwf/20170223/ECMWF_TROP_201702230600_201702230600_1.nc"
-        ]
+        # urls = [
+        #         "s3://opera-ecmwf/20170223/ECMWF_TROP_201702230000_201702230000_1.nc",
+        #         "s3://opera-ecmwf/20170223/ECMWF_TROP_201702230600_201702230600_1.nc"
+        # ]
 
         return urls
 
@@ -197,7 +185,7 @@ def tropo_job_dag():
                 mozart_url,
                 params=payload,  # send as JSON body, not query string
                 verify=False,    # NOTE: ignore SSL verification (test only)
-                auth=HTTPBasicAuth("", "")
+                auth=HTTPBasicAuth("verweyen", "")
             )
             job.raise_for_status()
             logging.info(job)
@@ -215,7 +203,7 @@ def tropo_job_dag():
 
                 #Job Polling loop
                 while True:
-                    status = requests.get(poll_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("", ""))
+                    status = requests.get(poll_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("verweyen", ""))
                     status.raise_for_status()
 
                     status_json = status.json()
@@ -230,7 +218,7 @@ def tropo_job_dag():
 
                 else:
                     result_url = "https://100.104.40.155/mozart/api/v0.1/job/info"
-                    result = requests.get(result_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("", ""))
+                    result = requests.get(result_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("verweyen", ""))
                     result.raise_for_status()
                     return result.json().get("message", "No message returned")
 
