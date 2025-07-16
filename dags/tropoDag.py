@@ -128,12 +128,12 @@ def tropo_job_dag():
 
         @task
         def submit_job(object_url):
+
+            object_url = "s3://opera-ecmwf/" + object_url
         
             jobtype = "job-SCIFLO_L4_TROPO:develop"
             queue = "opera-job_worker-sciflo-l4_tropo"
             mozart_url = "https://100.104.40.155/mozart/api/v0.1/job/submit"
-
-            logging.info(type(object_url))
 
             # Construct the payload. "params" must be a JSON string with the
             # actual metadata. The API expects the query string to look like
@@ -185,7 +185,7 @@ def tropo_job_dag():
                 mozart_url,
                 params=payload,  # send as JSON body, not query string
                 verify=False,    # NOTE: ignore SSL verification (test only)
-                auth=HTTPBasicAuth("verweyen", "")
+                auth=HTTPBasicAuth("verweyen", "Yogananda11*")
             )
             job.raise_for_status()
             logging.info(job)
@@ -203,7 +203,7 @@ def tropo_job_dag():
 
                 #Job Polling loop
                 while True:
-                    status = requests.get(poll_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("verweyen", ""))
+                    status = requests.get(poll_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("", ""))
                     status.raise_for_status()
 
                     status_json = status.json()
@@ -213,14 +213,14 @@ def tropo_job_dag():
                     logging.info(f"job: {job_id} {status_json['status']}")
                     time.sleep(2)
                 
-                if status_json["status"] == "job-failed":
+                if status_json["status"] == "job-failed" or status_json["status"] == "job-offline":
                   raise Exception(f"Processing for {object_url} failed, {response.get('message', 'No message')}!")
 
                 else:
                     result_url = "https://100.104.40.155/mozart/api/v0.1/job/info"
-                    result = requests.get(result_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("verweyen", ""))
+                    result = requests.get(result_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("", ""))
                     result.raise_for_status()
-                    return result.json().get("message", "No message returned")
+                    return job_id
 
             else:
                 raise Exception(f"Job submission for {object_url} failed, {response.get('message', 'No message')}!")
@@ -230,12 +230,39 @@ def tropo_job_dag():
         submit_job_result = submit_job(object_url=url)
 
         @task 
-        def post_processing():
+        def post_processing(job_id):
+
+            info_url = "https://100.104.40.155/mozart/api/v0.1/job/info"
+            poll_payload = {"id": job_id}
+            result = requests.get(info_url, verify=False, params=poll_payload, auth=HTTPBasicAuth("", ""))
+            result_json = result.json()
+
+            key = result_json["result"]["job"]["job_info"]["metrics"]["products_staged"][0]["id"]
+
+            bucket_name = "opera-dev-rs-ryhunter"
+
+            # Create S3 client
+            s3_client = boto3.client('s3')
+            
+            try:
+                # Check if the object exists in the bucket
+                s3_client.head_object(Bucket=bucket_name, Key=key)
+                logging.info(f"Key '{key}' exists in bucket '{bucket_name}'")
+                key_exists = True
+            except s3_client.exceptions.NoSuchKey:
+                logging.warning(f"Key '{key}' does not exist in bucket '{bucket_name}'")
+                key_exists = False
+            except Exception as e:
+                logging.error(f"Error checking key '{key}' in bucket '{bucket_name}': {str(e)}")
+                key_exists = False
+
+
+
             logging.info("PostProcessing job")
             time.sleep(10)
-            return "Postprocessed job"
+            return f"Postprocessed job - Key exists: {key_exists}"
 
-        post_processing_result = post_processing()
+        post_processing_result = post_processing(job_id=submit_job_result)
 
         preprocessing_result >> submit_job_result >> post_processing_result
         

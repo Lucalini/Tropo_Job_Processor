@@ -53,6 +53,7 @@ x-airflow-common:
   # build: .
   environment:
     &airflow-common-env
+    AWS_PROFILE: saml-pub
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -76,8 +77,6 @@ x-airflow-common:
     _PIP_ADDITIONAL_REQUIREMENTS: "boto3>=1.0.0 PyYAML>=6.0"
     # The following line can be used to set a custom config file, stored in the local config folder
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
-    AWS_ACCESS_KEY_ID: NOPE
-    AWS_SECRET_ACCESS_KEY: NOPE
     AWS_DEFAULT_REGION : us-west-2
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
@@ -178,6 +177,7 @@ services:
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - /var/run/docker.sock:/var/run/docker.sock
+    - /Users/verweyen/.aws:/home/airflow/.aws
     command: celery worker
     healthcheck:
       # yamllint disable rule:line-length
