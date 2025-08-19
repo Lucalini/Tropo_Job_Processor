@@ -6,6 +6,7 @@ import yaml
 import os
 import docker
 import sys
+import uuid
 
 dag_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dag_dir)
