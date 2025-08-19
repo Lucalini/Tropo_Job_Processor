@@ -148,6 +148,8 @@ def tropo_job_dag():
                 namespace="opera-dev",
                 name=f"tropo-pge-{job_id}",
                 image="opera_pge/tropo:3.0.0-er.3.1-tropo",
+                in_cluster = True,
+                config_file = None,
                 
                 # Simple command with -f runconfig flag
                 cmds=["/bin/bash", "-c"],
