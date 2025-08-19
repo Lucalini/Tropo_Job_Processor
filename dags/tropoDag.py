@@ -115,14 +115,15 @@ def tropo_job_dag():
         job_id = str(uuid.uuid4()).replace('-', '')[:8].lower()  # Remove hyphens and ensure lowercase
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         
-        # Environment variables for the main container
+        # Environment variables for the main container and init containers
         env_vars = {
             "UID": "1000",  # Use fixed UID for container compatibility
             "CONFIG_PATH": f"/workdir/config/runconfig.yaml",
             "INPUT_DATA_PATH": "/workdir/input1/data.nc",
             "OUTPUT_PATH": "/workdir/output/",
             "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
-            "JOB_ID": job_id
+            "JOB_ID": job_id,
+            "TROPO_OBJECT": "{{ task_instance.xcom_pull(task_ids='tropo_job_group.job_preprocessing', dag_id='tropo_PGE', key='return_value') }}"
         }
 
         # Shared volume for data exchange between containers
@@ -137,7 +138,6 @@ def tropo_job_dag():
         )
         
         preprocessing_result = job_preprocessing(s3_uri=s3_uri)
-        tropo_object_uri = str(preprocessing_result)
         
                 
         run_tropo_pge_k8s = KubernetesPodOperator(
@@ -163,8 +163,8 @@ def tropo_job_dag():
             get_logs=True,
             is_delete_operator_pod=True,
             
-            # CRITICAL: This service account must have IRSA annotation
-            service_account_name="airflow-worker",  # Dedicated service account for PGE pods
+            # Use the existing Airflow worker service account
+            service_account_name="airflow-worker",  # Existing service account with AWS permissions
 
             # Init containers for dual S3 downloads
             init_containers=[
@@ -176,9 +176,11 @@ def tropo_job_dag():
                     args=[
                         "set -e && "
                         "mkdir -p /workdir/input && "
-                        f"aws s3 cp 's3://opera-ecmwf/{tropo_object_uri}' '/workdir/input/{tropo_object_uri.split('/')[-1]}' && "
-                        f"echo 'Downloaded tropo object {tropo_object_uri} to /workdir/input/'"
+                        "FILENAME=$(basename \"$TROPO_OBJECT\") && "
+                        "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$FILENAME\" && "
+                        "echo \"Downloaded tropo object $TROPO_OBJECT to /workdir/input/$FILENAME\""
                     ],
+                    env=[k8s.V1EnvVar(name="TROPO_OBJECT", value=env_vars["TROPO_OBJECT"])],
                     volume_mounts=[shared_mount]
                 ),
                 
@@ -190,9 +192,11 @@ def tropo_job_dag():
                     args=[
                         "set -e && "
                         "mkdir -p /workdir/config && "
-                        f"aws s3 cp 's3://opera-dev-cc-verweyen/{f"tropo/runconfigs/{tropo_object_uri.split('/')[-1]}"}' '/workdir/config/runconfig.yaml' && "
+                        "FILENAME=$(basename \"$TROPO_OBJECT\") && "
+                        "aws s3 cp \"s3://opera-dev-cc-verweyen/tropo/runconfigs/$FILENAME\" '/workdir/config/runconfig.yaml' && "
                         "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
                     ],
+                    env=[k8s.V1EnvVar(name="TROPO_OBJECT", value=env_vars["TROPO_OBJECT"])],
                     volume_mounts=[shared_mount]
                 )
             ],
