@@ -166,12 +166,16 @@ def tropo_job_dag():
             # Use the existing Airflow worker service account
             service_account_name="airflow-worker",  # Existing service account with AWS permissions
 
-            resources={
-                "cpu": "12000m",     # 12 CPU cores (75% of 16)
-                "memory": "48Gi",    # 48GB RAM (75% of 64GB)
-                "limit_cpu": "15000m",       # Max 15 CPU cores (leave some headroom)
-                "limit_memory": "60Gi"       # Max 60GB RAM (leave some headroom)
-            },
+            container_resources=k8s.V1ResourceRequirements(
+                requests={
+                    "cpu": "12000m",     # 12 CPU cores (75% of 16)
+                    "memory": "48Gi"     # 48GB RAM (75% of 64GB)
+                },
+                limits={
+                    "cpu": "15000m",     # Max 15 CPU cores (leave some headroom)
+                    "memory": "60Gi"     # Max 60GB RAM (leave some headroom)
+                }
+            ),
             
             # Init containers for dual S3 downloads
             init_containers=[
