@@ -77,8 +77,8 @@ def tropo_job_dag():
         #temporarily hardcoded data search 
         bucket_name = "opera-ecmwf"
         response = get_tropo_objects(bucket_name, date="2024-12-31")   
-        s3_uris = [obj['Key'] for obj in response]
-        return s3_uris
+        logging.info(f"{response}")
+        return response
 
     @task_group(group_id="tropo_job_group")
     def process_tropo_object(s3_uri):
