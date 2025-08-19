@@ -124,7 +124,8 @@ def tropo_job_dag():
             "OUTPUT_PATH": "/workdir/output/",
             "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
             "JOB_ID": job_id,
-            "TROPO_OBJECT": preprocessing_result
+            # Pull the s3 object path from XCom at render time (per mapped index)
+            "TROPO_OBJECT": "{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing') }}"
         }
 
         # Shared volume for data exchange between containers
@@ -192,7 +193,12 @@ def tropo_job_dag():
                         "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$FILENAME\" && "
                         "echo \"Downloaded tropo object $TROPO_OBJECT to /workdir/input/$FILENAME\""
                     ],
-                    env=[k8s.V1EnvVar(name="s3_object", value=preprocessing_result)],
+                    env=[
+                        k8s.V1EnvVar(
+                            name="TROPO_OBJECT",
+                            value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing') }}"
+                        )
+                    ],
                     volume_mounts=[shared_mount]
                 ),
                 
@@ -208,7 +214,12 @@ def tropo_job_dag():
                         "aws s3 cp \"s3://opera-dev-cc-verweyen/tropo/runconfigs/$FILENAME\" '/workdir/config/runconfig.yaml' && "
                         "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
                     ],
-                    env=[k8s.V1EnvVar(name="s3_object", value=preprocessing_result)],
+                    env=[
+                        k8s.V1EnvVar(
+                            name="TROPO_OBJECT",
+                            value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing') }}"
+                        )
+                    ],
                     volume_mounts=[shared_mount]
                 )
             ],
