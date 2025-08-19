@@ -114,6 +114,7 @@ def tropo_job_dag():
 
         job_id = str(uuid.uuid4()).replace('-', '')[:8].lower()  # Remove hyphens and ensure lowercase
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        preprocessing_result = job_preprocessing(s3_uri=s3_uri)
         
         # Environment variables for the main container and init containers
         env_vars = {
@@ -123,7 +124,7 @@ def tropo_job_dag():
             "OUTPUT_PATH": "/workdir/output/",
             "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
             "JOB_ID": job_id,
-            "TROPO_OBJECT": "{{ task_instance.xcom_pull(task_ids='tropo_job_group.job_preprocessing', dag_id='tropo_PGE', key='return_value') }}"
+            "TROPO_OBJECT": preprocessing_result
         }
 
         # Shared volume for data exchange between containers
@@ -136,8 +137,6 @@ def tropo_job_dag():
             name="workdir",
             mount_path="/workdir"
         )
-        
-        preprocessing_result = job_preprocessing(s3_uri=s3_uri)
         
                 
         run_tropo_pge_k8s = KubernetesPodOperator(
@@ -193,7 +192,7 @@ def tropo_job_dag():
                         "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$FILENAME\" && "
                         "echo \"Downloaded tropo object $TROPO_OBJECT to /workdir/input/$FILENAME\""
                     ],
-                    env=[k8s.V1EnvVar(name="TROPO_OBJECT", value=env_vars["TROPO_OBJECT"])],
+                    env=[k8s.V1EnvVar(name="s3_object", value=preprocessing_result)],
                     volume_mounts=[shared_mount]
                 ),
                 
@@ -209,7 +208,7 @@ def tropo_job_dag():
                         "aws s3 cp \"s3://opera-dev-cc-verweyen/tropo/runconfigs/$FILENAME\" '/workdir/config/runconfig.yaml' && "
                         "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
                     ],
-                    env=[k8s.V1EnvVar(name="TROPO_OBJECT", value=env_vars["TROPO_OBJECT"])],
+                    env=[k8s.V1EnvVar(name="s3_object", value=preprocessing_result)],
                     volume_mounts=[shared_mount]
                 )
             ],
