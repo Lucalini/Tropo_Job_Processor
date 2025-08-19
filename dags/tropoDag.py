@@ -167,8 +167,8 @@ def tropo_job_dag():
             service_account_name="airflow-worker",  # Existing service account with AWS permissions
 
             resources={
-                "request_cpu": "12000m",     # 12 CPU cores (75% of 16)
-                "request_memory": "48Gi",    # 48GB RAM (75% of 64GB)
+                "cpu": "12000m",     # 12 CPU cores (75% of 16)
+                "memory": "48Gi",    # 48GB RAM (75% of 64GB)
                 "limit_cpu": "15000m",       # Max 15 CPU cores (leave some headroom)
                 "limit_memory": "60Gi"       # Max 60GB RAM (leave some headroom)
             },
