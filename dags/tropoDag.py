@@ -164,7 +164,7 @@ def tropo_job_dag():
             is_delete_operator_pod=True,
             
             # CRITICAL: This service account must have IRSA annotation
-            service_account_name="opera-pge-worker",  # Dedicated service account for PGE pods
+            service_account_name="airflow-worker",  # Dedicated service account for PGE pods
 
             # Init containers for dual S3 downloads
             init_containers=[
