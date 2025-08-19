@@ -110,116 +110,90 @@ def tropo_job_dag():
             #Return config uri, tropo object uri and the filepath to where both will be downloaded to in our tropo PGE
             return s3_config_uri
 
-        @task
-        def run_tropo_pge_kubernetes(config_path: str, input_path: str):
-            """
-            Run tropo PGE using KubernetesPodOperator with dual S3 downloads and upload
-            """
-            import uuid
-            from datetime import datetime
-            
-            # Generate unique identifiers for this job
-            job_id = str(uuid.uuid4())[:8]
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Environment variables for the main container
-            env_vars = {
-                "UID": str(os.getuid()),
-                "CONFIG_PATH": f"/workdir/config/runconfig.yaml",
-                "INPUT_DATA_PATH": "/workdir/input1/data.nc",
-                "OUTPUT_PATH": "/workdir/output/",
-                "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
-                "JOB_ID": job_id
-            }
+        job_id = str(uuid.uuid4()).replace('-', '')[:8].lower()  # Remove hyphens and ensure lowercase
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        
+        # Environment variables for the main container
+        env_vars = {
+            "UID": "1000",  # Use fixed UID for container compatibility
+            "CONFIG_PATH": f"/workdir/config/runconfig.yaml",
+            "INPUT_DATA_PATH": "/workdir/input1/data.nc",
+            "OUTPUT_PATH": "/workdir/output/",
+            "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
+            "JOB_ID": job_id
+        }
 
-            # Shared volume for data exchange between containers
-            shared_volume = k8s.V1Volume(
-                name="workdir",
-                empty_dir=k8s.V1EmptyDirVolumeSource()
-            )
+        # Shared volume for data exchange between containers
+        shared_volume = k8s.V1Volume(
+            name="workdir",
+            empty_dir=k8s.V1EmptyDirVolumeSource()
+        )
 
-            shared_mount = k8s.V1VolumeMount(
-                name="workdir",
-                mount_path="/workdir"
-            )
-                    
-            run_tropo_pge = KubernetesPodOperator(
-                task_id="run_tropo_pge_k8s",
-                namespace="opera-dev",
-                name=f"tropo-pge-{job_id}",
-                image="opera_pge/tropo:3.0.0-er.3.1-tropo",
-                in_cluster = True,
-                config_file = None,
+        shared_mount = k8s.V1VolumeMount(
+            name="workdir",
+            mount_path="/workdir"
+        )
                 
-                # Simple command with -f runconfig flag
-                cmds=["/bin/bash", "-c"],
-                arguments=[
-                    f"""
-                    set -e
-                    echo "Starting tropo PGE processing..."
-                    
-                    # Run tropo PGE with runconfig file
-                    /usr/local/bin/tropo_pge_entrypoint.sh -f /workdir/config/runconfig.yaml
-                    
-                    echo "Processing complete, uploading to S3..."
-                    
-                    # Upload results to S3 (all containers inherit IRSA permissions)
-                    aws s3 cp /workdir/output/ s3://opera-dev-cc-verweyen/tropo_outputs/$(date +%Y%m%d_%H%M%S)_$JOB_ID/ \\
-                        --recursive --exclude '*' --include '*.nc' --include '*.h5'
-                    
-                    echo "Upload complete. Results available at: s3://opera-dev-cc-verweyen/tropo_outputs/$(date +%Y%m%d_%H%M%S)_$JOB_ID/"
-                    """
-                ],
-                
-                env_vars=env_vars,
-                get_logs=True,
-                is_delete_operator_pod=True,
-                
-                # CRITICAL: This service account must have IRSA annotation
-                service_account_name="opera-pge-worker",  # Dedicated service account for PGE pods
-
-                # Init containers for dual S3 downloads
-                init_containers=[
-                    # Download from first bucket (tropo data)
-                    k8s.V1Container(
-                        name="download-tropo-data",
-                        image="amazon/aws-cli:2",
-                        command=["/bin/sh", "-c"],
-                        args=[
-                            f"set -e; "
-                            f"mkdir -p /workdir/input; "
-                            f"aws s3 cp s3://opera-ecmwf/{input_path} /workdir/input/{input_path.split('/')[-1]}; "
-                            f"echo 'Downloaded tropo object {input_path}  to /workdir/input/'"
-                        ],
-                        volume_mounts=[shared_mount]
-                    ),
-                    
-                    # Download from second bucket (ECMWF data) 
-                    k8s.V1Container(
-                        name="download-runconfig",
-                        image="amazon/aws-cli:2", 
-                        command=["/bin/sh", "-c"],
-                        args=[
-                            f"set -e; "
-                            f"mkdir -p /workdir/config; "
-                            f"aws s3 cp s3://opera-dev-cc-verweyen/{config_path} /workdir/config/runconfig.yaml; "
-                            f"echo 'Downloaded runconfig to /workdir/config/runconfig'"
-                        ],
-                        volume_mounts=[shared_mount]
-                    )
-                ],
-
-                volumes=[shared_volume],
-                volume_mounts=[shared_mount]
-            )
+        run_tropo_pge_k8s = KubernetesPodOperator(
+            task_id="run_tropo_pge_kubernetes",
+            namespace="opera-dev",
+            name=f"tropo-pge-{job_id}",  # job_id is already lowercase and DNS-compliant
+            image="opera_pge/tropo:3.0.0-er.3.1-tropo",
+            in_cluster=True,
+            config_file=None,
             
-            # Execute the pod and get results
-            result = run_tropo_pge.execute(context={})
+            # Simple command with -f runconfig flag
+            cmds=["/bin/bash", "-c"],
+            arguments=[
+                "set -e && " +
+                "echo 'Starting tropo PGE processing...' && " +
+                "/usr/local/bin/tropo_pge_entrypoint.sh -f /workdir/config/runconfig.yaml && " +
+                "echo 'Processing complete, uploading to S3...' && " +
+                f"aws s3 cp /workdir/output/ 's3://opera-dev-cc-verweyen/tropo_outputs/{timestamp}_{job_id}/' --recursive --exclude '*' --include '*.nc' --include '*.h5' && " +
+                f"echo 'Upload complete. Results available at: s3://opera-dev-cc-verweyen/tropo_outputs/{timestamp}_{job_id}/'"
+            ],
             
-            # Return the S3 URI of uploaded output  
-            s3_uri = f"s3://opera-dev-cc-verweyen/tropo_outputs/{timestamp}_{job_id}/"
-            logging.info(f"Tropo PGE processing complete. Output uploaded to: {s3_uri}")
-            return s3_uri
+            env_vars=env_vars,
+            get_logs=True,
+            is_delete_operator_pod=True,
+            
+            # CRITICAL: This service account must have IRSA annotation
+            service_account_name="opera-pge-worker",  # Dedicated service account for PGE pods
+
+            # Init containers for dual S3 downloads
+            init_containers=[
+                # Download from first bucket (tropo data)
+                k8s.V1Container(
+                    name="download-tropo-data",
+                    image="amazon/aws-cli:2",
+                    command=["/bin/sh", "-c"],
+                    args=[
+                        "set -e && "
+                        "mkdir -p /workdir/input && "
+                        f"aws s3 cp 's3://opera-ecmwf/{s3_uri}' '/workdir/input/{s3_uri.split('/')[-1]}' && "
+                        f"echo 'Downloaded tropo object {s3_uri} to /workdir/input/'"
+                    ],
+                    volume_mounts=[shared_mount]
+                ),
+                
+                # Download from second bucket (config data) 
+                k8s.V1Container(
+                    name="download-runconfig",
+                    image="amazon/aws-cli:2", 
+                    command=["/bin/sh", "-c"],
+                    args=[
+                        "set -e && "
+                        "mkdir -p /workdir/config && "
+                        f"aws s3 cp 's3://opera-dev-cc-verweyen/{preprocessing_result}' '/workdir/config/runconfig.yaml' && "
+                        "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
+                    ],
+                    volume_mounts=[shared_mount]
+                )
+            ],
+
+            volumes=[shared_volume],
+            volume_mounts=[shared_mount]
+        )
            
 
         @task 
@@ -229,13 +203,12 @@ def tropo_job_dag():
             return "Postprocessed job"
             
         preprocessing_result = job_preprocessing(s3_uri=s3_uri)
-        # Execute the Kubernetes-based tropo PGE
-        k8s_result = run_tropo_pge_kubernetes(config_path=preprocessing_result, input_path=s3_uri)
         post_processing_result = post_processing()
 
-        preprocessing_result >> k8s_result >> post_processing_result
+        # Set up task dependencies
+        preprocessing_result >> run_tropo_pge_k8s >> post_processing_result
         
-        return k8s_result  # Return the S3 URI of the processed output
+        return run_tropo_pge_k8s  # Return reference to the Kubernetes operator
     
     s3_uris = data_search()
     process_tropo_object.expand(s3_uri=s3_uris)
