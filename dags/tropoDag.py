@@ -166,6 +166,11 @@ def tropo_job_dag():
             # Use the existing Airflow worker service account
             service_account_name="airflow-worker",  # Existing service account with AWS permissions
 
+            node_selector={
+                "eks.amazonaws.com/nodegroup": "opera-dev-airflow-cpu",
+                "cat": "tropo-worker"
+            },
+            
             # Init containers for dual S3 downloads
             init_containers=[
                 # Download from first bucket (tropo data)
