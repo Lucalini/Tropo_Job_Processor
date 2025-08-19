@@ -80,7 +80,7 @@ def tropo_job_dag():
         bucket_name = "opera-ecmwf"
         response = get_tropo_objects(bucket_name, date="2024-12-31")   
         logging.info(f"{response}")
-        return response
+        return [response[0]]
 
     @task_group(group_id="tropo_job_group")
     def process_tropo_object(s3_uri):
@@ -166,9 +166,11 @@ def tropo_job_dag():
             # Use the existing Airflow worker service account
             service_account_name="airflow-worker",  # Existing service account with AWS permissions
 
-            node_selectors={
-                "eks.amazonaws.com/nodegroup": "opera-dev-airflow-cpu",
-                "cat": "tropo-worker"
+            resources={
+                "request_cpu": "12000m",     # 12 CPU cores (75% of 16)
+                "request_memory": "48Gi",    # 48GB RAM (75% of 64GB)
+                "limit_cpu": "15000m",       # Max 15 CPU cores (leave some headroom)
+                "limit_memory": "60Gi"       # Max 60GB RAM (leave some headroom)
             },
             
             # Init containers for dual S3 downloads
