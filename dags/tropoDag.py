@@ -109,7 +109,8 @@ def tropo_job_dag():
             s3_config_uri = f"tropo/runconfigs/{s3_uri.split('/')[-1]}"
             bucket.upload_file(local_config_path, s3_config_uri)
             #Return config uri, tropo object uri and the filepath to where both will be downloaded to in our tropo PGE
-            return s3_config_uri
+            input_path = f"/workdir/input/{s3_uri.split('/')[-1]}"
+            return s3_config_uri, s3_uri
 
         job_id = str(uuid.uuid4()).replace('-', '')[:8].lower()  # Remove hyphens and ensure lowercase
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -134,6 +135,11 @@ def tropo_job_dag():
             name="workdir",
             mount_path="/workdir"
         )
+        
+        preprocessing_result = job_preprocessing(s3_uri=s3_uri)
+        config_path = preprocessing_result[0]
+        tropo_object_uri = preprocessing_result[1]
+        
                 
         run_tropo_pge_k8s = KubernetesPodOperator(
             task_id="run_tropo_pge_kubernetes",
@@ -171,8 +177,8 @@ def tropo_job_dag():
                     args=[
                         "set -e && "
                         "mkdir -p /workdir/input && "
-                        f"aws s3 cp 's3://opera-ecmwf/{s3_uri}' '/workdir/input/{s3_uri.split('/')[-1]}' && "
-                        f"echo 'Downloaded tropo object {s3_uri} to /workdir/input/'"
+                        f"aws s3 cp 's3://opera-ecmwf/{tropo_object_uri}' '/workdir/input/{tropo_object_uri.split('/')[-1]}' && "
+                        f"echo 'Downloaded tropo object {tropo_object_uri} to /workdir/input/'"
                     ],
                     volume_mounts=[shared_mount]
                 ),
@@ -185,7 +191,7 @@ def tropo_job_dag():
                     args=[
                         "set -e && "
                         "mkdir -p /workdir/config && "
-                        f"aws s3 cp 's3://opera-dev-cc-verweyen/{preprocessing_result}' '/workdir/config/runconfig.yaml' && "
+                        f"aws s3 cp 's3://opera-dev-cc-verweyen/{config_path}' '/workdir/config/runconfig.yaml' && "
                         "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
                     ],
                     volume_mounts=[shared_mount]
@@ -203,7 +209,7 @@ def tropo_job_dag():
             time.sleep(10)
             return "Postprocessed job"
             
-        preprocessing_result = job_preprocessing(s3_uri=s3_uri)
+        
         post_processing_result = post_processing()
 
         # Set up task dependencies
