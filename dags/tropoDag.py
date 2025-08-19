@@ -153,11 +153,17 @@ def tropo_job_dag():
             # Simple command with -f runconfig flag
             cmds=["/bin/bash", "-c"],
             arguments=[
-                "set -e && " +
-                "echo 'Starting tropo PGE processing...' && " +
-                "/usr/local/bin/tropo_pge_entrypoint.sh -f /workdir/config/runconfig.yaml && " +
-                "echo 'Processing complete, uploading to S3...' && " +
-                f"aws s3 cp /workdir/output/ 's3://opera-dev-cc-verweyen/tropo_outputs/{timestamp}_{job_id}/' --recursive --exclude '*' --include '*.nc' --include '*.h5' && " +
+                # Pre-stage inputs and runconfig, then execute PGE and upload results
+                "set -e && "
+                "echo 'Staging inputs...' && "
+                "mkdir -p /workdir/input /workdir/config && "
+                "FILENAME=$(basename \"$TROPO_OBJECT\") && "
+                "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$FILENAME\" && "
+                "aws s3 cp \"s3://opera-dev-cc-verweyen/tropo/runconfigs/$FILENAME\" '/workdir/config/runconfig.yaml' && "
+                "echo 'Starting tropo PGE processing...' && "
+                "/usr/local/bin/tropo_pge_entrypoint.sh -f /workdir/config/runconfig.yaml && "
+                "echo 'Processing complete, uploading to S3...' && "
+                f"aws s3 cp /workdir/output/ 's3://opera-dev-cc-verweyen/tropo_outputs/{timestamp}_{job_id}/' --recursive --exclude '*' --include '*.nc' --include '*.h5' && "
                 f"echo 'Upload complete. Results available at: s3://opera-dev-cc-verweyen/tropo_outputs/{timestamp}_{job_id}/'"
             ],
             
@@ -178,51 +184,6 @@ def tropo_job_dag():
                     "memory": "60Gi"     # Max 60GB RAM (leave some headroom)
                 }
             ),
-            
-            # Init containers for dual S3 downloads
-            init_containers=[
-                # Download from first bucket (tropo data)
-                k8s.V1Container(
-                    name="download-tropo-data",
-                    image="amazon/aws-cli:2.15.8",
-                    command=["/bin/sh", "-c"],
-                    args=[
-                        "set -e && "
-                        "mkdir -p /workdir/input && "
-                        "FILENAME=$(basename \"$TROPO_OBJECT\") && "
-                        "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$FILENAME\" && "
-                        "echo \"Downloaded tropo object $TROPO_OBJECT to /workdir/input/$FILENAME\""
-                    ],
-                    env=[
-                        k8s.V1EnvVar(
-                            name="TROPO_OBJECT",
-                            value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing') }}"
-                        )
-                    ],
-                    volume_mounts=[shared_mount]
-                ),
-                
-                # Download from second bucket (config data) 
-                k8s.V1Container(
-                    name="download-runconfig",
-                    image="amazon/aws-cli:2.15.8", 
-                    command=["/bin/sh", "-c"],
-                    args=[
-                        "set -e && "
-                        "mkdir -p /workdir/config && "
-                        "FILENAME=$(basename \"$TROPO_OBJECT\") && "
-                        "aws s3 cp \"s3://opera-dev-cc-verweyen/tropo/runconfigs/$FILENAME\" '/workdir/config/runconfig.yaml' && "
-                        "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
-                    ],
-                    env=[
-                        k8s.V1EnvVar(
-                            name="TROPO_OBJECT",
-                            value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing') }}"
-                        )
-                    ],
-                    volume_mounts=[shared_mount]
-                )
-            ],
 
             volumes=[shared_volume],
             volume_mounts=[shared_mount]
