@@ -166,7 +166,7 @@ def tropo_job_dag():
             # Use the existing Airflow worker service account
             service_account_name="airflow-worker",  # Existing service account with AWS permissions
 
-            node_selector={
+            node_selectors={
                 "eks.amazonaws.com/nodegroup": "opera-dev-airflow-cpu",
                 "cat": "tropo-worker"
             },
