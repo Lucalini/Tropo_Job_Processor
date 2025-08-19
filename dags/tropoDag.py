@@ -5,6 +5,10 @@ import logging
 import yaml
 import os
 import docker
+
+dag_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(dag_dir)
+
 from util import get_tropo_objects
 import boto3
 from kubernetes.client import models as k8s
