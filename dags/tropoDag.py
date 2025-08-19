@@ -53,7 +53,8 @@ def create_modified_runconfig(template_path, output_path, **kwargs):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(f"{output_path}runconfig.yaml", 'w') as file:
         yaml.dump(config, file, default_flow_style=False, sort_keys=False, indent=2)
-    return output_path
+    runconfig_output = f"{output_path}runconfig.yaml"
+    return runconfig_output
 
 default_args = {
     'owner': 'airflow',
