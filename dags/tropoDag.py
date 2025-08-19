@@ -106,8 +106,7 @@ def tropo_job_dag():
             bucket_name = "opera-dev-cc-verweyen"
             bucket = s3.Bucket(bucket_name)
             s3_config_uri = f"tropo/runconfigs/{s3_uri.split('/')[-1]}"
-            bucket.upload_file(local_config_path, bucket_name, s3_config_uri)
-
+            bucket.upload_file(local_config_path, s3_config_uri)
             #Return config uri, tropo object uri and the filepath to where both will be downloaded to in our tropo PGE
             return s3_config_uri
 
