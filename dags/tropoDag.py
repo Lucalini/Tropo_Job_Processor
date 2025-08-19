@@ -13,7 +13,7 @@ sys.path.append(dag_dir)
 from util import get_tropo_objects
 import boto3
 from kubernetes.client import models as k8s
-from airflow.providers.cncf.kubernetes.operators.kubernetes_pod import KubernetesPodOperator
+from airflow.providers.kubernetes.operators.pod import KubernetesPodOperator
 
 
 bucket_name = ''
