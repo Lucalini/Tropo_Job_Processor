@@ -184,7 +184,7 @@ def tropo_job_dag():
                 # Download from first bucket (tropo data)
                 k8s.V1Container(
                     name="download-tropo-data",
-                    image="amazon/aws-cli:2",
+                    image="amazon/aws-cli:2.15.8",
                     command=["/bin/sh", "-c"],
                     args=[
                         "set -e && "
@@ -200,7 +200,7 @@ def tropo_job_dag():
                 # Download from second bucket (config data) 
                 k8s.V1Container(
                     name="download-runconfig",
-                    image="amazon/aws-cli:2", 
+                    image="amazon/aws-cli:2.15.8", 
                     command=["/bin/sh", "-c"],
                     args=[
                         "set -e && "
