@@ -125,7 +125,7 @@ def tropo_job_dag():
             "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
             "JOB_ID": job_id,
             # Pull the s3 object path from XCom at render time (per mapped index)
-            "TROPO_OBJECT": "{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing') }}"
+            "TROPO_OBJECT": "ECMWF_TROP_202412310000_202412310000_1.nc"
         }
 
         # Shared volume for data exchange between containers
