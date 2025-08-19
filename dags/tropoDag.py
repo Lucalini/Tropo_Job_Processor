@@ -137,7 +137,7 @@ def tropo_job_dag():
         )
         
         preprocessing_result = job_preprocessing(s3_uri=s3_uri)
-        tropo_object_uri = preprocessing_result
+        tropo_object_uri = str(preprocessing_result)
         
                 
         run_tropo_pge_k8s = KubernetesPodOperator(
