@@ -104,7 +104,7 @@ def tropo_job_dag():
                 product_version="0.3"
             )
             bucket_name = "opera-dev-cc-verweyen"
-            bucket = s3_resource.Bucket(bucekt_name)
+            bucket = s3.Bucket(bucekt_name)
             s3_config_uri = f"tropo/runconfigs/{s3_uri.split('/')[-1]}"
             bucket.upload_file(local_config_path, bucket_name, s3_config_uri)
 
