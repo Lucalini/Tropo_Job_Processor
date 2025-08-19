@@ -97,7 +97,7 @@ def tropo_job_dag():
             template_file = os.path.join(DAG_DIR, "tropo_sample_runconfig-v3.0.0-er.3.1.yaml")
             local_config_path = create_modified_runconfig(
                 template_path=template_file,
-                output_path= f"/opt/airflow/storage/runconfigs/{s3_uri}",
+                output_path= f"/opt/airflow/storage/runconfigs/{s3_uri.split('/')[-1]}",
                 input_file=  f"/workdir/input/{s3_uri.split('/')[-1]}",
                 output_dir="/workdir/output/",
                 scratch_dir="/workdir/output/scratch",
@@ -106,7 +106,7 @@ def tropo_job_dag():
             )
             bucket_name = "opera-dev-cc-verweyen"
             bucket = s3.Bucket(bucket_name)
-            s3_config_uri = f"tropo/runconfigs/{s3_uri.split('/')[-1]}"
+            s3_config_uri = f"tropo/runconfigs"
             bucket.upload_file(local_config_path, s3_config_uri)
             #Return config uri, tropo object uri and the filepath to where both will be downloaded to in our tropo PGE
             input_path = f"/workdir/input/{s3_uri.split('/')[-1]}"
@@ -144,7 +144,7 @@ def tropo_job_dag():
             task_id="run_tropo_pge_kubernetes",
             namespace="opera-dev",
             name=f"tropo-pge-{job_id}",  # job_id is already lowercase and DNS-compliant
-            image="opera_pge/tropo:3.0.0-er.3.1-tropo",
+            image="https://artifactory-fn.jpl.nasa.gov/artifactory/general/gov/nasa/jpl/opera/sds/pge/tropo/opera_pge-tropo-3.0.0-er.3.1-tropo.tar.gz",
             in_cluster=True,
             config_file=None,
             init_container_logs=True,
