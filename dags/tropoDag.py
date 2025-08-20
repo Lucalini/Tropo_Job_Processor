@@ -155,14 +155,7 @@ def tropo_job_dag():
             init_container_logs=True,
             startup_timeout_seconds=600,
             
-            cmds=["/bin/bash", "-c"],
-            arguments=[
-                "set -e; "
-                "echo 'Staging inputs...'; "
-                "mkdir -p /workdir/input /workdir/config; "
-                "echo 'Starting tropo PGE processing...'; "
-                "/usr/local/bin/tropo_pge_entrypoint.sh -f /workdir/config/runconfig.yaml"
-            ],
+            arguments=["-f /workdir/config/runconfig.yaml"],
 
             init_containers= [
                     k8s.V1Container(
