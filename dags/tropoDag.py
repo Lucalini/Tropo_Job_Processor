@@ -38,7 +38,7 @@ def create_modified_runconfig(template_path, output_path, **kwargs):
     output_dir = kwargs.get('output_dir')
     scratch_dir = kwargs.get('scratch_dir')
     n_workers = kwargs.get('n_workers', 4)
-    product_version = kwargs.get('product_version', '0.2')
+    product_version = kwargs.get('product_version', '1.0')
     
     # Modify paths based on parameters
     config['RunConfig']['Groups']['PGE']['InputFilesGroup']['InputFilePaths'] = [input_file]
