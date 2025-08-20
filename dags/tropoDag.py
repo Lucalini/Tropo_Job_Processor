@@ -144,7 +144,7 @@ def tropo_job_dag():
             task_id="run_tropo_pge_kubernetes",
             namespace="opera-dev",
             name=f"tropo-pge-{job_id}",  # job_id is already lowercase and DNS-compliant
-            image="artifactory-fn.jpl.nasa.gov/artifactory/general/gov/nasa/jpl/opera/sds/pge/tropo/opera_pge-tropo-3.0.0-er.3.1-tropo.tar.gz,
+            image="artifactory-fn.jpl.nasa.gov/artifactory/general/gov/nasa/jpl/opera/sds/pge/tropo/opera_pge-tropo-3.0.0-er.3.1-tropo.tar.gz",
             in_cluster=True,
             config_file=None,
             init_container_logs=True,
