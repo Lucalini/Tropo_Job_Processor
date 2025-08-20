@@ -146,6 +146,7 @@ def tropo_job_dag():
             name=f"tropo-pge-{job_id}",  # job_id is already lowercase and DNS-compliant
             image="https://artifactory-fn.jpl.nasa.gov/ui/repos/tree/General/docker-develop-local/gov/nasa/jpl/opera/sds/pge/opera_pge/tropo/3.0.0-rc.1.0-tropo",
             in_cluster=True,
+            image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
             config_file=None,
             init_container_logs=True,
             startup_timeout_seconds=600,
