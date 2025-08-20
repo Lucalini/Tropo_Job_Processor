@@ -155,7 +155,7 @@ def tropo_job_dag():
             init_container_logs=True,
             startup_timeout_seconds=600,
             
-            cmds=["-f", "/workdir/config/runconfig.yaml"],
+            arguments=["-f", "/workdir/config/runconfig.yaml"],
 
             init_containers= [
                     k8s.V1Container(
