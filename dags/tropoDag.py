@@ -102,7 +102,7 @@ def tropo_job_dag():
                 output_dir="/workdir/output/",
                 scratch_dir="/workdir/output/scratch",
                 n_workers=4,
-                product_version="0.3"
+                product_version="1.0"
             )
             bucket_name = "opera-dev-cc-verweyen"
             bucket = s3.Bucket(bucket_name)
