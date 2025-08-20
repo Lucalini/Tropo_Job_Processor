@@ -124,7 +124,7 @@ def tropo_job_dag():
             "OUTPUT_PATH": "/workdir/output/",
             "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
             "JOB_ID": job_id,
-            "TROPO_OBJECT": "ECMWF_TROP_202412310000_202412310000_1.nc",
+            "TROPO_OBJECT": "20241231/ECMWF_TROP_202412310000_202412310000_1.nc",
             "RUN_CONFIG": "ECMWF_TROP_202412310000_202412310000_1runconfig.yaml"
         }
 
