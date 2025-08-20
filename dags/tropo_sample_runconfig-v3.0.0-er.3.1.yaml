@@ -49,7 +49,7 @@ RunConfig:
         ProductIdentifier: TROPO
 
         # Product version specific to output products
-        ProductVersion: "0.2"
+        ProductVersion: "1.0"
 
         # Path to the executable to run, path must be reachable from
         # within the Docker container (i.e. findable with a "which" command)
