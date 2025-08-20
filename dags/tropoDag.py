@@ -97,7 +97,7 @@ def tropo_job_dag():
             template_file = os.path.join(DAG_DIR, "tropo_sample_runconfig-v3.0.0-er.3.1.yaml")
             local_config_path = create_modified_runconfig(
                 template_path=template_file,
-                output_path= f"/opt/airflow/storage/runconfigs/{s3_uri.split('/')[-1]}",
+                output_path= f"/opt/airflow/storage/runconfigs/{s3_uri.split('/')[-1].split('.')[0]}",
                 input_file=  f"/workdir/input/{s3_uri.split('/')[-1]}",
                 output_dir="/workdir/output/",
                 scratch_dir="/workdir/output/scratch",
@@ -106,7 +106,7 @@ def tropo_job_dag():
             )
             bucket_name = "opera-dev-cc-verweyen"
             bucket = s3.Bucket(bucket_name)
-            s3_config_uri = f"tropo/runconfigs"
+            s3_config_uri = f"tropo/runconfigs/ECMWF_TROP_202412310000_202412310000_1runconfig.yaml"
             bucket.upload_file(local_config_path, s3_config_uri)
             #Return config uri, tropo object uri and the filepath to where both will be downloaded to in our tropo PGE
             input_path = f"/workdir/input/{s3_uri.split('/')[-1]}"
@@ -118,15 +118,18 @@ def tropo_job_dag():
         
         # Environment variables for the main container and init containers
         env_vars = {
-            "UID": "1000",  # Use fixed UID for container compatibility
+            "UID": "1000", 
             "CONFIG_PATH": f"/workdir/config/runconfig.yaml",
             "INPUT_DATA_PATH": "/workdir/input1/data.nc",
             "OUTPUT_PATH": "/workdir/output/",
             "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
             "JOB_ID": job_id,
-            # Pull the s3 object path from XCom at render time (per mapped index)
-            "TROPO_OBJECT": "ECMWF_TROP_202412310000_202412310000_1.nc"
+            "TROPO_OBJECT": "ECMWF_TROP_202412310000_202412310000_1.nc",
+            "RUN_CONFIG": "ECMWF_TROP_202412310000_202412310000_1runconfig.yaml"
         }
+
+        # Convert dict to k8s env list for V1Container.env
+        init_env = [k8s.V1EnvVar(name=k, value=v) for k, v in env_vars.items()]
 
         # Shared volume for data exchange between containers
         shared_volume = k8s.V1Volume(
@@ -143,30 +146,54 @@ def tropo_job_dag():
         run_tropo_pge_k8s = KubernetesPodOperator(
             task_id="run_tropo_pge_kubernetes",
             namespace="opera-dev",
-            name=f"tropo-pge-{job_id}",  # job_id is already lowercase and DNS-compliant
+            name=f"tropo-pge-{job_id}", 
             image="artifactory-fn.jpl.nasa.gov:16001/gov/nasa/jpl/opera/sds/pge/opera_pge/tropo:3.0.0-rc.1.0-tropo",
             in_cluster=True,
+            kubernetes_conn_id=None,
             image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
             config_file=None,
             init_container_logs=True,
             startup_timeout_seconds=600,
             
-            # Simple command with -f runconfig flag
             cmds=["/bin/bash", "-c"],
             arguments=[
-                # Pre-stage inputs and runconfig, then execute PGE and upload results
-                "set -e && "
-                "echo 'Staging inputs...' && "
-                "mkdir -p /workdir/input /workdir/config && "
-                "FILENAME=$(basename \"$TROPO_OBJECT\") && "
-                "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$FILENAME\" && "
-                "aws s3 cp \"s3://opera-dev-cc-verweyen/tropo/runconfigs/$FILENAME\" '/workdir/config/runconfig.yaml' && "
-                "echo 'Starting tropo PGE processing...' && "
-                "/usr/local/bin/tropo_pge_entrypoint.sh -f /workdir/config/runconfig.yaml && "
-                "echo 'Processing complete, uploading to S3...' && "
-                f"aws s3 cp /workdir/output/ 's3://opera-dev-cc-verweyen/tropo_outputs/{timestamp}_{job_id}/' --recursive --exclude '*' --include '*.nc' --include '*.h5' && "
-                f"echo 'Upload complete. Results available at: s3://opera-dev-cc-verweyen/tropo_outputs/{timestamp}_{job_id}/'"
+                "set -e; "
+                "echo 'Staging inputs...'; "
+                "mkdir -p /workdir/input /workdir/config; "
+                "echo 'Starting tropo PGE processing...'; "
+                "/usr/local/bin/tropo_pge_entrypoint.sh -f /workdir/config/runconfig.yaml"
             ],
+
+            init_containers= [
+                    k8s.V1Container(
+                        name="download-tropo-data",
+                        image="amazon/aws-cli:2.17.52",
+                        command=["/bin/sh", "-c"],
+                        args=[
+                            "set -e; "
+                            "mkdir -p /workdir/input; "
+                            "F=$(basename \"$TROPO_OBJECT\"); "
+                            "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; "
+                            "echo \"Downloaded $F to /workdir/input/\""
+                        ],
+                        volume_mounts=[shared_mount],
+                        env=init_env
+                    ),
+                    k8s.V1Container(
+                        name="download-runconfig",
+                        image="amazon/aws-cli:2.17.52", 
+                        command=["/bin/sh", "-c"],
+                        args=[
+                            "set -e; "
+                            "mkdir -p /workdir/config; "
+                            "aws s3 cp \"s3://$S3_OUTPUT_BUCKET/tropo/runconfigs/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; "
+                            "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
+                        ],
+                        volume_mounts=[shared_mount],
+                        env=init_env
+                    )
+                ],
+
             
             env_vars=env_vars,
             get_logs=True,
@@ -210,3 +237,17 @@ def tropo_job_dag():
 
 # Instantiate the DAG
 job = tropo_job_dag()
+
+
+# sidecar = k8s.V1Container(
+#     name="uploader",
+#     image="public.ecr.aws/aws-cli/aws-cli:2.17.52",
+#     command=["/bin/sh","-c"],
+#     args=[
+#         "set -e; "
+#         "until [ -d /workdir/output ] && [ \"$(ls -A /workdir/output || true)\" ]; do sleep 5; done; "
+#         "aws s3 cp /workdir/output/ s3://opera-dev-cc-verweyen/tropo_outputs/$JOB_ID/ --recursive --exclude '*' --include '*.nc' --include '*.h5'"
+#     ],
+#     env= env_vars,
+#     volume_mounts=[shared_mount],
+# )
