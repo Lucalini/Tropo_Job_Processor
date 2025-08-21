@@ -190,7 +190,7 @@ def tropo_job_dag():
             
             env_vars=env_vars,
             get_logs=True,
-            is_delete_operator_pod=True,
+            is_delete_operator_pod=False,
             
             # Use the existing Airflow worker service account
             service_account_name="airflow-worker",  # Existing service account with AWS permissions
