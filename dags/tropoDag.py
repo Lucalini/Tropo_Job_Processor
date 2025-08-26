@@ -4,7 +4,6 @@ import time
 import logging
 import yaml
 import os
-import docker
 import sys
 import uuid
 
@@ -13,7 +12,7 @@ sys.path.append(dag_dir)
 
 from util import get_tropo_objects
 import boto3
-from kubernetes.client import models as k8s
+from kubernetes.client import V1Pod, V1PodSpec, V1Container, models as k8s
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
 
 
@@ -100,7 +99,7 @@ def tropo_job_dag():
                 output_path= f"/opt/airflow/storage/runconfigs/{s3_uri.split('/')[-1].split('.')[0]}",
                 input_file=  f"/workdir/input/{s3_uri.split('/')[-1]}",
                 output_dir="/workdir/output/",
-                scratch_dir="/workdir/output/scratch",
+                scratch_dir="/workdir/scratch",
                 n_workers=4,
                 product_version="1.0"
             )
@@ -141,22 +140,42 @@ def tropo_job_dag():
             name="workdir",
             mount_path="/workdir"
         )
-        
-                
-        run_tropo_pge_k8s = KubernetesPodOperator(
-            task_id="run_tropo_pge_kubernetes",
-            namespace="opera-dev",
-            name=f"tropo-pge-{job_id}", 
-            image="artifactory-fn.jpl.nasa.gov:16001/gov/nasa/jpl/opera/sds/pge/opera_pge/tropo:3.0.0-rc.1.0-tropo",
-            in_cluster=True,
-            kubernetes_conn_id=None,
-            image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
-            config_file=None,
-            init_container_logs=True,
-            startup_timeout_seconds=600,
-            
-            arguments=["-f", "/workdir/config/runconfig.yaml"],
 
+        main_container = V1Container(
+            name="main",
+            image="artifactory-fn.jpl.nasa.gov:16001/gov/nasa/jpl/opera/sds/pge/opera_pge/tropo:3.0.0-rc.1.0-tropo",
+            arguments=["-f", "/workdir/config/runconfig.yaml"],
+            volume_mounts=[shared_mount],
+            volumes = [shared_volume],
+
+            resources=k8s.V1ResourceRequirements(
+                requests={
+                    "cpu": "12000m",     # 12 CPU cores (75% of 16)
+                    "memory": "48Gi"     # 48GB RAM (75% of 64GB)
+                },
+                limits={
+                    "cpu": "15000m",     # Max 15 CPU cores (leave some headroom)
+                    "memory": "60Gi"     # Max 60GB RAM (leave some headroom)
+                }
+            ),
+        )
+
+        sidecar_container = V1Container(
+            name="sidecar",
+            image="amazon/aws-cli:2.15.0",
+            command=["sh", "-c"],
+            args=[
+                "echo 'Waiting for main to finish...'; "
+                "while [ -z \\\"$(ls -A workdir/output)\\\" ]; do sleep 5; done;"
+                "echo 'Main finished, uploading...'; "
+                "aws s3 cp /workdir/output s3://$opera-dev-cc-verweyen/output1"
+            ],
+            volume_mounts=[shared_mount],
+            volumes = [shared_volume]
+        )
+        
+        pod_spec = V1PodSpec(
+            restart_policy = "Never",
             init_containers= [
                     k8s.V1Container(
                         name="download-tropo-data",
@@ -186,26 +205,25 @@ def tropo_job_dag():
                         env=init_env
                     )
                 ],
-
-            
+                image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
+                containers = [main_container, sidecar_container],
+                volumes = [shared_volume]
+        )
+                
+        run_tropo_pge_k8s = KubernetesPodOperator(
+            task_id="run_tropo_pge_kubernetes",
+            namespace="opera-dev",
+            name=f"tropo-pge-{job_id}", 
+            in_cluster=True,
+            kubernetes_conn_id=None,
+            config_file=None,
+            init_container_logs=True,
+            startup_timeout_seconds=600,
+            full_pod_spec = V1Pod(metadata={"name":"PGE-with-sidecar-init"}, spec=pod_spec),
             env_vars=env_vars,
             get_logs=True,
             is_delete_operator_pod=False,
-            
-            # Use the existing Airflow worker service account
             service_account_name="airflow-worker",  # Existing service account with AWS permissions
-
-            container_resources=k8s.V1ResourceRequirements(
-                requests={
-                    "cpu": "12000m",     # 12 CPU cores (75% of 16)
-                    "memory": "48Gi"     # 48GB RAM (75% of 64GB)
-                },
-                limits={
-                    "cpu": "15000m",     # Max 15 CPU cores (leave some headroom)
-                    "memory": "60Gi"     # Max 60GB RAM (leave some headroom)
-                }
-            ),
-
             volumes=[shared_volume],
             volume_mounts=[shared_mount]
         )
@@ -231,16 +249,3 @@ def tropo_job_dag():
 # Instantiate the DAG
 job = tropo_job_dag()
 
-
-# sidecar = k8s.V1Container(
-#     name="uploader",
-#     image="public.ecr.aws/aws-cli/aws-cli:2.17.52",
-#     command=["/bin/sh","-c"],
-#     args=[
-#         "set -e; "
-#         "until [ -d /workdir/output ] && [ \"$(ls -A /workdir/output || true)\" ]; do sleep 5; done; "
-#         "aws s3 cp /workdir/output/ s3://opera-dev-cc-verweyen/tropo_outputs/$JOB_ID/ --recursive --exclude '*' --include '*.nc' --include '*.h5'"
-#     ],
-#     env= env_vars,
-#     volume_mounts=[shared_mount],
-# )
