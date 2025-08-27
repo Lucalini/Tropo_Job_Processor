@@ -192,7 +192,6 @@ def tropo_job_dag():
                 "  sleep 5; "
                 "done"
             ],
-            env=env_vars,
             volume_mounts=[shared_mount]
         )
 
@@ -211,7 +210,6 @@ def tropo_job_dag():
                         "echo \"Downloaded $F to /workdir/input/\""
                     ],
                     volume_mounts=[shared_mount],
-                    env=env_vars
                 ),
                 k8s.V1Container(
                     name="download-runconfig",
@@ -226,7 +224,6 @@ def tropo_job_dag():
                         "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
                     ],
                     volume_mounts=[shared_mount],
-                    env=env_vars
                 )
             ],
             image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
@@ -250,7 +247,8 @@ def tropo_job_dag():
             container_logs=["tropo-pge", "s3-upload-sidecar", "download-runconfig", "download-tropo-data"],
             # Stream init container logs (set to True for all, or list specific names)
             init_container_logs=True,
-            is_delete_operator_pod=False
+            is_delete_operator_pod=False,
+            env_vars = env_vars,
         )
            
 
