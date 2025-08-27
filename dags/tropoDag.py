@@ -1,4 +1,5 @@
 from airflow.decorators import dag, task, task_group
+from airflow.models.param import Param
 from datetime import datetime, timedelta
 import time
 import logging
@@ -14,6 +15,7 @@ from util import get_tropo_objects
 import boto3
 from kubernetes.client import V1Pod, V1PodSpec, V1Container, models as k8s
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+
 
 
 
@@ -70,14 +72,28 @@ default_args = {
     start_date=datetime(2025, 1, 1),
     catchup=False,
     tags=['Luca'],
+    params = {
+        "bucket": Param(None, type=str), 
+        "date": Param(None, type=str),
+        "start_datetime": Param(None, type= str),
+        "end_datetime": Param(None, type=str) ,
+        "prefix": Param(None, type= str),
+        "forward_mode_age": Param(None, type = str)
+    }
 )
 def tropo_job_dag():
     
     @task
-    def data_search():
-        #temporarily hardcoded data search 
-        bucket_name = "opera-ecmwf"
-        response = get_tropo_objects(bucket_name, date="2024-12-31")   
+    def data_search(**context):
+        params = context["params"]
+        response = get_tropo_objects(
+            params["bucket"], 
+            params["date"], 
+            params["start_datetime"], 
+            params["end_datetime"], 
+            params["prefix"], 
+            params["forward_mode_age"]
+            )   
         logging.info(f"{response}")
         return [response[0]]
 
@@ -105,135 +121,145 @@ def tropo_job_dag():
             )
             bucket_name = "opera-dev-cc-verweyen"
             bucket = s3.Bucket(bucket_name)
-            s3_config_uri = f"tropo/runconfigs/ECMWF_TROP_202412310000_202412310000_1runconfig.yaml"
+            s3_config_uri = f"tropo/runconfigs/{s3_uri.split('/')[-1].split('.')[0]}runconfig.yaml"
             bucket.upload_file(local_config_path, s3_config_uri)
             #Return config uri, tropo object uri and the filepath to where both will be downloaded to in our tropo PGE
             input_path = f"/workdir/input/{s3_uri.split('/')[-1]}"
-            return s3_uri
+            return s3_uri, s3_config_uri
 
-        job_id = str(uuid.uuid4()).replace('-', '')[:8].lower()  # Remove hyphens and ensure lowercase
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        preprocessing_result = job_preprocessing(s3_uri=s3_uri)
-        
-        # Environment variables for the main container and init containers
-        env_vars = {
-            "UID": "1000", 
-            "CONFIG_PATH": f"/workdir/config/runconfig.yaml",
-            "INPUT_DATA_PATH": "/workdir/input1/data.nc",
-            "OUTPUT_PATH": "/workdir/output/",
-            "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
-            "JOB_ID": job_id,
-            "TROPO_OBJECT": "20241231/ECMWF_TROP_202412310000_202412310000_1.nc",
-            "RUN_CONFIG": "ECMWF_TROP_202412310000_202412310000_1runconfig.yaml"
-        }
+        @task
+        def run_tropo_pge(tropo_uri, config_uri, **context):
+            job_id = str(uuid.uuid4()).replace('-', '')[:8].lower()  # Remove hyphens and ensure lowercase
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")       
+            # Environment variables for the main container and init containers
+            env_vars = {
+                "UID": "1000", 
+                "CONFIG_PATH": f"/workdir/config/runconfig.yaml",
+                "INPUT_DATA_PATH": "/workdir/input1/data.nc",
+                "OUTPUT_PATH": "/workdir/output/",
+                "S3_OUTPUT_BUCKET": "opera-dev-cc-verweyen",
+                "JOB_ID": job_id,
+                "TROPO_OBJECT": tropo_uri,
+                "RUN_CONFIG": config_uri
+            }
 
-        # Convert dict to k8s env list for V1Container.env
-        init_env = [k8s.V1EnvVar(name=k, value=v) for k, v in env_vars.items()]
+            # Convert dict to k8s env list for V1Container.env
+            init_env = [k8s.V1EnvVar(name=k, value=v) for k, v in env_vars.items()]
 
-        # Shared volume for data exchange between containers
-        shared_volume = k8s.V1Volume(
-            name="workdir",
-            empty_dir=k8s.V1EmptyDirVolumeSource()
-        )
-
-        shared_mount = k8s.V1VolumeMount(
-            name="workdir",
-            mount_path="/workdir"
-        )
-
-        main_container = V1Container(
-            name="tropo-pge",
-            image="artifactory-fn.jpl.nasa.gov:16001/gov/nasa/jpl/opera/sds/pge/opera_pge/tropo:3.0.0-rc.1.0-tropo",
-            args=["-f", "/workdir/config/runconfig.yaml"],
-            volume_mounts=[shared_mount],
-            env=init_env,
-            resources=k8s.V1ResourceRequirements(
-                requests={
-                    "cpu": "12000m",     # 12 CPU cores (75% of 16)
-                    "memory": "48Gi"     # 48GB RAM (75% of 64GB)
-                },
-                limits={
-                    "cpu": "15000m",     # Max 15 CPU cores (leave some headroom)
-                    "memory": "60Gi"     # Max 60GB RAM (leave some headroom)
-                }
+            # Shared volume for data exchange between containers
+            shared_volume = k8s.V1Volume(
+                name="workdir",
+                empty_dir=k8s.V1EmptyDirVolumeSource()
             )
-        )
 
-        sidecar_container = V1Container(
-            name="s3-upload-sidecar",
-            image="amazon/aws-cli:2.17.52",
-            command=["sh", "-c"],
-            args=[
-                "echo 'Starting S3 sidecar...'; "
-                "while true; do "
-                "  if [ -d /workdir/output ] && [ \"$(ls -A /workdir/output 2>/dev/null)\" ]; then "
-                "    echo 'Found output files, syncing to S3...'; "
-                "    aws s3 sync /workdir/output s3://$S3_OUTPUT_BUCKET/tropo/outputs/$JOB_ID/ --exclude 'scratch/*'; "
-                "  fi; "
-                "  if [ -f /workdir/output/_DONE ]; then "
-                "    echo 'Main container finished, final sync and exit'; "
-                "    aws s3 sync /workdir/output s3://$S3_OUTPUT_BUCKET/tropo/outputs/$JOB_ID/ --exclude 'scratch/*'; "
-                "    exit 0; "
-                "  fi; "
-                "  sleep 30; "
-                "done"
-            ],
-            env=init_env,
-            volume_mounts=[shared_mount]
-        )
-        
-        pod_spec = V1PodSpec(
-            restart_policy="Never",
-            init_containers=[
-                k8s.V1Container(
-                    name="download-tropo-data",
-                    image="amazon/aws-cli:2.17.52",
-                    command=["/bin/sh", "-c"],
-                    args=[
-                        "set -e; "
-                        "mkdir -p /workdir/input; "
-                        "F=$(basename \"$TROPO_OBJECT\"); "
-                        "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; "
-                        "echo \"Downloaded $F to /workdir/input/\""
-                    ],
-                    volume_mounts=[shared_mount],
-                    env=init_env
-                ),
-                k8s.V1Container(
-                    name="download-runconfig",
-                    image="amazon/aws-cli:2.17.52", 
-                    command=["/bin/sh", "-c"],
-                    args=[
-                        "set -e; "
-                        "mkdir -p /workdir/config; "
-                        "aws s3 cp \"s3://$S3_OUTPUT_BUCKET/tropo/runconfigs/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; "
-                        "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
-                    ],
-                    volume_mounts=[shared_mount],
-                    env=init_env
+            shared_mount = k8s.V1VolumeMount(
+                name="workdir",
+                mount_path="/workdir"
+            )
+
+            main_container = V1Container(
+                name="tropo-pge",
+                image="artifactory-fn.jpl.nasa.gov:16001/gov/nasa/jpl/opera/sds/pge/opera_pge/tropo:3.0.0-rc.1.0-tropo",
+                args=["-f", "/workdir/config/runconfig.yaml"],
+                volume_mounts=[shared_mount],
+                env=init_env,
+                resources=k8s.V1ResourceRequirements(
+                    requests={
+                        "cpu": "12000m",     # 12 CPU cores (75% of 16)
+                        "memory": "48Gi"     # 48GB RAM (75% of 64GB)
+                    },
+                    limits={
+                        "cpu": "15000m",     # Max 15 CPU cores (leave some headroom)
+                        "memory": "60Gi"     # Max 60GB RAM (leave some headroom)
+                    }
                 )
-            ],
-            image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
-            containers=[main_container, sidecar_container],
-            volumes=[shared_volume],
-            service_account_name="airflow-worker"
-        )
-                
-        run_tropo_pge_k8s = KubernetesPodOperator(
-            task_id="run_tropo_pge_kubernetes",
-            namespace="opera-dev",
-            name=f"tropo-pge-{job_id}", 
-            in_cluster=True,
-            kubernetes_conn_id=None,
-            config_file=None,
-            startup_timeout_seconds=600,
-            full_pod_spec=V1Pod(
-                metadata=k8s.V1ObjectMeta(name=f"tropo-pge-{job_id}"),
-                spec=pod_spec
-            ),
-            get_logs=True,
-            is_delete_operator_pod=False
-        )
+            )
+
+            sidecar_container = V1Container(
+                name="s3-upload-sidecar",
+                image="amazon/aws-cli:2.17.52",
+                command=["sh", "-c"],
+                args=[
+                    "echo 'Starting S3 sidecar, waiting for output files...'; "
+                    "while true; do "
+                    "  if [ -d /workdir/output ] && [ \"$(ls -A /workdir/output 2>/dev/null)\" ]; then "
+                    "    echo 'Found output files! Starting 2-minute sync period...'; "
+                    "    END_TIME=$(($(date +%s) + 120)); "  # 2 minutes from now
+                    "    while [ $(date +%s) -lt $END_TIME ]; do "
+                    "      echo 'Syncing to S3...'; "
+                    "      aws s3 sync /workdir/output s3://$S3_OUTPUT_BUCKET/tropo/outputs/$JOB_ID/ --exclude 'scratch/*'; "
+                    "      sleep 10; "
+                    "    done; "
+                    "    echo 'Final sync and exit'; "
+                    "    aws s3 sync /workdir/output s3://$S3_OUTPUT_BUCKET/tropo/outputs/$JOB_ID/ --exclude 'scratch/*'; "
+                    "    exit 0; "
+                    "  fi; "
+                    "  sleep 5; "
+                    "done"
+                ],
+                env=init_env,
+                volume_mounts=[shared_mount]
+            )
+            
+            pod_spec = V1PodSpec(
+                restart_policy="Never",
+                init_containers=[
+                    k8s.V1Container(
+                        name="download-tropo-data",
+                        image="amazon/aws-cli:2.17.52",
+                        command=["/bin/sh", "-c"],
+                        args=[
+                            "set -e; "
+                            "mkdir -p /workdir/input; "
+                            "F=$(basename \"$TROPO_OBJECT\"); "
+                            "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; "
+                            "echo \"Downloaded $F to /workdir/input/\""
+                        ],
+                        volume_mounts=[shared_mount],
+                        env=init_env
+                    ),
+                    k8s.V1Container(
+                        name="download-runconfig",
+                        image="amazon/aws-cli:2.17.52", 
+                        command=["/bin/sh", "-c"],
+                        args=[
+                            "set -e; "
+                            "mkdir -p /workdir/config; "
+                            "aws s3 cp \"s3://$S3_OUTPUT_BUCKET/tropo/runconfigs/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; "
+                            "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
+                        ],
+                        volume_mounts=[shared_mount],
+                        env=init_env
+                    )
+                ],
+                image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
+                containers=[main_container, sidecar_container],
+                volumes=[shared_volume],
+                service_account_name="airflow-worker"
+            )
+                    
+            operator =  KubernetesPodOperator(
+                task_id=f"run_tropo_pge_kubernetes_{job_id}",
+                namespace="opera-dev",
+                name=f"tropo-pge-{job_id}", 
+                in_cluster=True,
+                kubernetes_conn_id=None,
+                config_file=None,
+                startup_timeout_seconds=600,
+                full_pod_spec=V1Pod(
+                    metadata=k8s.V1ObjectMeta(name=f"tropo-pge-{job_id}"),
+                    spec=pod_spec
+                ),
+                get_logs=True,
+                is_delete_operator_pod=True
+            )
+
+            result = operator.execute(context)
+
+            return {
+                "job_id": job_id,
+                "result": result
+            }
            
 
         @task 
@@ -242,13 +268,14 @@ def tropo_job_dag():
             time.sleep(10)
             return "Postprocessed job"
             
-        
+        preprocessing_result = job_preprocessing(s3_uri=s3_uri)
+        pge_run = run_tropo_pge(preprocessing_result[0], preprocessing_result[1])
         post_processing_result = post_processing()
 
         # Set up task dependencies
-        preprocessing_result >> run_tropo_pge_k8s >> post_processing_result
+        preprocessing_result >> pge_run >> post_processing_result
         
-        return run_tropo_pge_k8s  # Return reference to the Kubernetes operator
+        return pge_run  # Return reference to the Kubernetes operator
     
     s3_uris = data_search()
     process_tropo_object.expand(s3_uri=s3_uris)
