@@ -73,12 +73,12 @@ default_args = {
     catchup=False,
     tags=['Luca'],
     params = {
-        "bucket": Param(None, type=str), 
-        "date": Param(None, type=str),
-        "start_datetime": Param(None, type= str),
-        "end_datetime": Param(None, type=str) ,
-        "prefix": Param(None, type= str),
-        "forward_mode_age": Param(None, type = str)
+        "bucket": Param(None, type="string"), 
+        "date": Param(None, type="string"),
+        "start_datetime": Param(None, type= "string"),
+        "end_datetime": Param(None, type="string") ,
+        "prefix": Param(None, type="string"),
+        "forward_mode_age": Param(None, type="string")
     }
 )
 def tropo_job_dag():
