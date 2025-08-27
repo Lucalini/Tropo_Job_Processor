@@ -245,7 +245,7 @@ def tropo_job_dag():
             get_logs=True,
             log_events_on_failure=True,
             # Stream logs from both main and sidecar containers (requires recent k8s provider)
-            container_logs=["tropo-pge", "s3-upload-sidecar"],
+            container_logs=["tropo-pge", "s3-upload-sidecar", "download-runconfig", "download-tropo-data"],
             # Stream init container logs (set to True for all, or list specific names)
             init_container_logs=True,
             is_delete_operator_pod=False
