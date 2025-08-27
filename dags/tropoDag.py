@@ -243,6 +243,11 @@ def tropo_job_dag():
             startup_timeout_seconds=600,
             full_pod_spec=V1Pod(spec=pod_spec),
             get_logs=True,
+            log_events_on_failure=True,
+            # Stream logs from both main and sidecar containers (requires recent k8s provider)
+            container_logs=["tropo-pge", "s3-upload-sidecar"],
+            # Stream init container logs (set to True for all, or list specific names)
+            init_container_logs=True,
             is_delete_operator_pod=False
         )
            
