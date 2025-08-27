@@ -204,7 +204,6 @@ def tropo_job_dag():
                     image="amazon/aws-cli:2.17.52",
                     command=["/bin/sh", "-c"],
                     args=[
-                        "echo \ hi \",
                         "set -e; ",
                         "mkdir -p /workdir/input; ",
                         "F=$(basename \"$TROPO_OBJECT\"); ",
@@ -219,6 +218,7 @@ def tropo_job_dag():
                     image="amazon/aws-cli:2.17.52",
                     command=["/bin/sh", "-c"],
                     args=[
+                        "echo 'Starting S3 runconfig download $RUN_CONFIG'; ",
                         "set -e; ",
                         "mkdir -p /workdir/config; ",
                         "aws s3 cp \"s3://$S3_OUTPUT_BUCKET/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; ",
