@@ -125,8 +125,11 @@ def tropo_job_dag():
             bucket.upload_file(local_config_path, s3_config_uri)
             #Return config uri, tropo object uri and the filepath to where both will be downloaded to in our tropo PGE
             input_path = f"/workdir/input/{s3_uri.split('/')[-1]}"
-            return s3_uri, s3_config_uri
-
+            return {
+            'tropo_uri': s3_uri,
+            'config_uri': s3_config_uri
+            }
+        
         @task
         def run_tropo_pge(tropo_uri, config_uri, **context):
             job_id = str(uuid.uuid4()).replace('-', '')[:8].lower()  # Remove hyphens and ensure lowercase
@@ -269,7 +272,7 @@ def tropo_job_dag():
             return "Postprocessed job"
             
         preprocessing_result = job_preprocessing(s3_uri=s3_uri)
-        pge_run = run_tropo_pge(preprocessing_result[0], preprocessing_result[1])
+        pge_run = run_tropo_pge(preprocessing_result['tropo_uri'], preprocessing_result['config_uri'])
         post_processing_result = post_processing()
 
         # Set up task dependencies
