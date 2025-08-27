@@ -204,6 +204,7 @@ def tropo_job_dag():
                     image="amazon/aws-cli:2.17.52",
                     command=["/bin/sh", "-c"],
                     args=[
+                        "echo \ hi \",
                         "set -e; ",
                         "mkdir -p /workdir/input; ",
                         "F=$(basename \"$TROPO_OBJECT\"); ",
