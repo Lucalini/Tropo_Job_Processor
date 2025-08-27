@@ -109,7 +109,7 @@ def tropo_job_dag():
             logging.info(f"Generating runconfig for job {s3_uri}")
 
             DAG_DIR = os.path.dirname(__file__)
-            template_file = os.path.join(DAG_DIR, "resources", "tropo_sample_runconfig-v3.0.0-er.3.1.yaml")
+            template_file = os.path.join(DAG_DIR, "tropo_sample_runconfig-v3.0.0-er.3.1.yaml")
             local_config_path = create_modified_runconfig(
                 template_path=template_file,
                 output_path= f"/opt/airflow/storage/runconfigs/{s3_uri.split('/')[-1].split('.')[0]}",
@@ -142,9 +142,6 @@ def tropo_job_dag():
             mount_path="/workdir"
         )
 
-        logging.info("{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['tropo_uri'] }}")
-
-        # Environment variables for containers
         env_vars = [
             k8s.V1EnvVar(name="UID", value="1000"),
             k8s.V1EnvVar(name="CONFIG_PATH", value="/workdir/config/runconfig.yaml"),
