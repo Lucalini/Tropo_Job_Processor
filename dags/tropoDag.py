@@ -254,7 +254,7 @@ def tropo_job_dag():
                     spec=pod_spec
                 ),
                 get_logs=True,
-                is_delete_operator_pod=True
+                is_delete_operator_pod=False
             )
 
             result = operator.execute(context)
