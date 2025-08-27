@@ -218,6 +218,7 @@ def tropo_job_dag():
                     image="amazon/aws-cli:2.17.52",
                     command=["/bin/sh", "-c"],
                     args=[
+                        "sleep 500;",
                         "echo 'Starting S3 runconfig download $RUN_CONFIG'; ",
                         "set -e; ",
                         "mkdir -p /workdir/config; ",
@@ -272,4 +273,3 @@ def tropo_job_dag():
 
 # Instantiate the DAG
 job = tropo_job_dag()
-
