@@ -142,21 +142,22 @@ def tropo_job_dag():
             mount_path="/workdir"
         )
 
-        # Static environment variables for the main and sidecar containers
-        static_env_vars = [
+        env_vars = [
             k8s.V1EnvVar(name="UID", value="1000"),
             k8s.V1EnvVar(name="CONFIG_PATH", value="/workdir/config/runconfig.yaml"),
             k8s.V1EnvVar(name="OUTPUT_PATH", value="/workdir/output/"),
             k8s.V1EnvVar(name="S3_OUTPUT_BUCKET", value="opera-dev-cc-verweyen"),
             k8s.V1EnvVar(name="JOB_ID", value="{{ ts_nodash }}-{{ ti.map_index }}"),
+            k8s.V1EnvVar(name="TROPO_OBJECT", value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['tropo_uri'] }}"),
+            k8s.V1EnvVar(name="RUN_CONFIG", value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['config_uri'] }}"),
         ]
 
         main_container = V1Container(
             name="tropo-pge",
             image="artifactory-fn.jpl.nasa.gov:16001/gov/nasa/jpl/opera/sds/pge/opera_pge/tropo:3.0.0-rc.1.0-tropo",
-            args=["sleep 400"],
+            args=["-f", "/workdir/config/runconfig.yaml"],
             volume_mounts=[shared_mount],
-            env=static_env_vars,
+            env=env_vars,
             resources=k8s.V1ResourceRequirements(
                 requests={
                     "cpu": "12000m",
@@ -175,7 +176,6 @@ def tropo_job_dag():
             command=["sh", "-c"],
             args=[
                 "echo 'Starting S3 sidecar, waiting for output files...'; "
-                "sleep 400;"
                 "while true; do "
                 "  if [ -d /workdir/output ] && [ \"$(ls -A /workdir/output 2>/dev/null)\" ]; then "
                 "    echo 'Found output files! Starting 2-minute sync period...'; "
@@ -192,50 +192,43 @@ def tropo_job_dag():
                 "  sleep 5; "
                 "done"
             ],
-            env=static_env_vars,
+            env=env_vars,
             volume_mounts=[shared_mount]
         )
 
         pod_spec = V1PodSpec(
             restart_policy="Never",
-            # init_containers=[
-            #     k8s.V1Container(
-            #         name="download-tropo-data",
-            #         image="amazon/aws-cli:2.17.52",
-            #         command=["/bin/sh", "-c"],
-            #         args=[
-            #             "set -euxo pipefail; "
-            #             "mkdir -p /workdir/input; "
-            #             "F=$(basename \"$TROPO_OBJECT\"); "
-            #             "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; "
-            #             "echo \"Downloaded $F to /workdir/input/\""
-            #         ],
-            #         volume_mounts=[shared_mount],
-            #         env=[
-            #             k8s.V1EnvVar(name="AWS_STS_REGIONAL_ENDPOINTS", value="regional"),
-            #             k8s.V1EnvVar(name="AWS_DEFAULT_REGION", value="us-west-2"),
-            #             k8s.V1EnvVar(name="AWS_REGION", value="us-west-2"),
-            #         ]
-            #     ),
-            #     k8s.V1Container(
-            #         name="download-runconfig",
-            #         image="amazon/aws-cli:2.17.52",
-            #         command=["/bin/sh", "-c"],
-            #         args=[
-            #             "set -euxo pipefail; "
-            #             "echo 'Starting S3 runconfig download'; "
-            #             "mkdir -p /workdir/config; "
-            #             "aws s3 cp \"s3://opera-dev-cc-verweyen/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; "
-            #             "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
-            #         ],
-            #         volume_mounts=[shared_mount],
-            #         env=[
-            #             k8s.V1EnvVar(name="AWS_STS_REGIONAL_ENDPOINTS", value="regional"),
-            #             k8s.V1EnvVar(name="AWS_DEFAULT_REGION", value="us-west-2"),
-            #             k8s.V1EnvVar(name="AWS_REGION", value="us-west-2"),
-            #         ]
-            #     )
-            # ],
+            init_containers=[
+                k8s.V1Container(
+                    name="download-tropo-data",
+                    image="amazon/aws-cli:2.17.52",
+                    command=["/bin/sh", "-c"],
+                    args=[
+                        "set -euxo pipefail; ",
+                        "mkdir -p /workdir/input; ",
+                        "F=$(basename \"$TROPO_OBJECT\"); ",
+                        "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; ",
+                        "echo \"Downloaded $F to /workdir/input/\""
+                    ],
+                    volume_mounts=[shared_mount],
+                    env=env_vars
+                ),
+                k8s.V1Container(
+                    name="download-runconfig",
+                    image="amazon/aws-cli:2.17.52",
+                    command=["/bin/sh", "-c"],
+                    args=[
+                        "set -euxo pipefail;",
+                        "echo 'Starting S3 runconfig download $RUN_CONFIG'; ",
+                        "set -e; ",
+                        "mkdir -p /workdir/config; ",
+                        "aws s3 cp \"s3://$S3_OUTPUT_BUCKET/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; ",
+                        "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
+                    ],
+                    volume_mounts=[shared_mount],
+                    env=env_vars
+                )
+            ],
             image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
             containers=[main_container, sidecar_container],
             volumes=[shared_volume],
@@ -260,11 +253,6 @@ def tropo_job_dag():
             is_delete_operator_pod=False,
             # Additional settings to prevent deletion
             on_finish_action="keep_pod",  # Keep pod after completion
-            # Template these environment variables and they'll override the placeholder values in init containers
-            env_vars=[
-                k8s.V1EnvVar(name="TROPO_OBJECT", value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['tropo_uri'] }}"),
-                k8s.V1EnvVar(name="RUN_CONFIG", value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['config_uri'] }}"),
-            ],
         )
            
 
