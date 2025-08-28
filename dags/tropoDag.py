@@ -154,7 +154,7 @@ def tropo_job_dag():
         main_container = V1Container(
             name="tropo-pge",
             image="artifactory-fn.jpl.nasa.gov:16001/gov/nasa/jpl/opera/sds/pge/opera_pge/tropo:3.0.0-rc.1.0-tropo",
-            args=["-f", "/workdir/config/runconfig.yaml"],
+            args=["sleep 400"],
             volume_mounts=[shared_mount],
             env=static_env_vars,
             resources=k8s.V1ResourceRequirements(
@@ -175,6 +175,7 @@ def tropo_job_dag():
             command=["sh", "-c"],
             args=[
                 "echo 'Starting S3 sidecar, waiting for output files...'; "
+                "sleep 400;"
                 "while true; do "
                 "  if [ -d /workdir/output ] && [ \"$(ls -A /workdir/output 2>/dev/null)\" ]; then "
                 "    echo 'Found output files! Starting 2-minute sync period...'; "
