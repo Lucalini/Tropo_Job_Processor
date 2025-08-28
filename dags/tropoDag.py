@@ -205,7 +205,6 @@ def tropo_job_dag():
                     args=[
                         "set -euxo pipefail; "
                         "mkdir -p /workdir/input; "
-                        "TROPO_OBJECT='{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['tropo_uri'] }}'; "
                         "F=$(basename \"$TROPO_OBJECT\"); "
                         "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; "
                         "echo \"Downloaded $F to /workdir/input/\""
@@ -225,7 +224,7 @@ def tropo_job_dag():
                         "set -euxo pipefail; "
                         "echo 'Starting S3 runconfig download'; "
                         "mkdir -p /workdir/config; "
-                        "aws s3 cp \"s3://opera-dev-cc-verweyen/{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['config_uri'] }}\" '/workdir/config/runconfig.yaml'; "
+                        "aws s3 cp \"s3://opera-dev-cc-verweyen/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; "
                         "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
                     ],
                     volume_mounts=[shared_mount],
@@ -260,10 +259,12 @@ def tropo_job_dag():
             is_delete_operator_pod=False,
             # Additional settings to prevent deletion
             on_finish_action="keep_pod",  # Keep pod after completion
+            # Template these environment variables and they'll override the placeholder values in init containers
+            env_vars=[
+                k8s.V1EnvVar(name="TROPO_OBJECT", value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['tropo_uri'] }}"),
+                k8s.V1EnvVar(name="RUN_CONFIG", value="{{ ti.xcom_pull(task_ids='tropo_job_group.job_preprocessing')['config_uri'] }}"),
+            ],
         )
-        
-        # Enable templating for the full pod spec so init container args get templated
-        kpo.template_fields = tuple(list(kpo.template_fields) + ['full_pod_spec'])
            
 
         @task 
