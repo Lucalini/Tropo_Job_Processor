@@ -192,6 +192,7 @@ def tropo_job_dag():
                 "  sleep 5; "
                 "done"
             ],
+            env=env_vars,
             volume_mounts=[shared_mount]
         )
 
@@ -203,20 +204,21 @@ def tropo_job_dag():
                     image="amazon/aws-cli:2.17.52",
                     command=["/bin/sh", "-c"],
                     args=[
-                        "set -e; ",
+                        "set -euxo pipefail; ",
                         "mkdir -p /workdir/input; ",
                         "F=$(basename \"$TROPO_OBJECT\"); ",
                         "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; ",
                         "echo \"Downloaded $F to /workdir/input/\""
                     ],
                     volume_mounts=[shared_mount],
+                    env=env_vars
                 ),
                 k8s.V1Container(
                     name="download-runconfig",
                     image="amazon/aws-cli:2.17.52",
                     command=["/bin/sh", "-c"],
                     args=[
-                        "sleep 500;",
+                        "set -euxo pipefail;",
                         "echo 'Starting S3 runconfig download $RUN_CONFIG'; ",
                         "set -e; ",
                         "mkdir -p /workdir/config; ",
@@ -224,6 +226,7 @@ def tropo_job_dag():
                         "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
                     ],
                     volume_mounts=[shared_mount],
+                    env=env_vars
                 )
             ],
             image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
@@ -248,7 +251,8 @@ def tropo_job_dag():
             # Stream init container logs (set to True for all, or list specific names)
             init_container_logs=True,
             is_delete_operator_pod=False,
-            env_vars = env_vars,
+            # Additional settings to prevent deletion
+            on_finish_action="keep_pod",  # Keep pod after completion
         )
            
 
