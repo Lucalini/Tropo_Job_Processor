@@ -109,7 +109,7 @@ def tropo_job_dag():
             logging.info(f"Generating runconfig for job {s3_uri}")
 
             DAG_DIR = os.path.dirname(__file__)
-            template_file = os.path.join(DAG_DIR, "resources", "tropo_sample_runconfig-v3.0.0-er.3.1.yaml")
+            template_file = os.path.join(DAG_DIR, "tropo_sample_runconfig-v3.0.0-er.3.1.yaml")
             local_config_path = create_modified_runconfig(
                 template_path=template_file,
                 output_path= f"/opt/airflow/storage/runconfigs/{s3_uri.split('/')[-1].split('.')[0]}",
