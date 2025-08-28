@@ -197,44 +197,44 @@ def tropo_job_dag():
 
         pod_spec = V1PodSpec(
             restart_policy="Never",
-            init_containers=[
-                k8s.V1Container(
-                    name="download-tropo-data",
-                    image="amazon/aws-cli:2.17.52",
-                    command=["/bin/sh", "-c"],
-                    args=[
-                        "set -euxo pipefail; "
-                        "mkdir -p /workdir/input; "
-                        "F=$(basename \"$TROPO_OBJECT\"); "
-                        "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; "
-                        "echo \"Downloaded $F to /workdir/input/\""
-                    ],
-                    volume_mounts=[shared_mount],
-                    env=[
-                        k8s.V1EnvVar(name="AWS_STS_REGIONAL_ENDPOINTS", value="regional"),
-                        k8s.V1EnvVar(name="AWS_DEFAULT_REGION", value="us-west-2"),
-                        k8s.V1EnvVar(name="AWS_REGION", value="us-west-2"),
-                    ]
-                ),
-                k8s.V1Container(
-                    name="download-runconfig",
-                    image="amazon/aws-cli:2.17.52",
-                    command=["/bin/sh", "-c"],
-                    args=[
-                        "set -euxo pipefail; "
-                        "echo 'Starting S3 runconfig download'; "
-                        "mkdir -p /workdir/config; "
-                        "aws s3 cp \"s3://opera-dev-cc-verweyen/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; "
-                        "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
-                    ],
-                    volume_mounts=[shared_mount],
-                    env=[
-                        k8s.V1EnvVar(name="AWS_STS_REGIONAL_ENDPOINTS", value="regional"),
-                        k8s.V1EnvVar(name="AWS_DEFAULT_REGION", value="us-west-2"),
-                        k8s.V1EnvVar(name="AWS_REGION", value="us-west-2"),
-                    ]
-                )
-            ],
+            # init_containers=[
+            #     k8s.V1Container(
+            #         name="download-tropo-data",
+            #         image="amazon/aws-cli:2.17.52",
+            #         command=["/bin/sh", "-c"],
+            #         args=[
+            #             "set -euxo pipefail; "
+            #             "mkdir -p /workdir/input; "
+            #             "F=$(basename \"$TROPO_OBJECT\"); "
+            #             "aws s3 cp \"s3://opera-ecmwf/$TROPO_OBJECT\" \"/workdir/input/$F\"; "
+            #             "echo \"Downloaded $F to /workdir/input/\""
+            #         ],
+            #         volume_mounts=[shared_mount],
+            #         env=[
+            #             k8s.V1EnvVar(name="AWS_STS_REGIONAL_ENDPOINTS", value="regional"),
+            #             k8s.V1EnvVar(name="AWS_DEFAULT_REGION", value="us-west-2"),
+            #             k8s.V1EnvVar(name="AWS_REGION", value="us-west-2"),
+            #         ]
+            #     ),
+            #     k8s.V1Container(
+            #         name="download-runconfig",
+            #         image="amazon/aws-cli:2.17.52",
+            #         command=["/bin/sh", "-c"],
+            #         args=[
+            #             "set -euxo pipefail; "
+            #             "echo 'Starting S3 runconfig download'; "
+            #             "mkdir -p /workdir/config; "
+            #             "aws s3 cp \"s3://opera-dev-cc-verweyen/$RUN_CONFIG\" '/workdir/config/runconfig.yaml'; "
+            #             "echo 'Downloaded runconfig to /workdir/config/runconfig.yaml'"
+            #         ],
+            #         volume_mounts=[shared_mount],
+            #         env=[
+            #             k8s.V1EnvVar(name="AWS_STS_REGIONAL_ENDPOINTS", value="regional"),
+            #             k8s.V1EnvVar(name="AWS_DEFAULT_REGION", value="us-west-2"),
+            #             k8s.V1EnvVar(name="AWS_REGION", value="us-west-2"),
+            #         ]
+            #     )
+            # ],
             image_pull_secrets=[k8s.V1LocalObjectReference(name="artifactory-creds")],
             containers=[main_container, sidecar_container],
             volumes=[shared_volume],
